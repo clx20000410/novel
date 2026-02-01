@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --version:*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000)",
+      "Bash(npm run dev:*)",
+      "Bash(timeout:*)",
+      "Bash(\".venv/Scripts/python.exe\" -m uvicorn:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(tasklist:*)",
+      "Bash(start cmd /c start.bat)",
+      "mcp__augment-context-engine__codebase-retrieval",
+      "Bash(python -m scripts.migrate_llm_configs:*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m scripts.migrate_llm_configs)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -c \"import sqlite3; conn = sqlite3.connect\\(''storage/arboris.db''\\); cursor = conn.cursor\\(\\); cursor.execute\\(''PRAGMA table_info\\(llm_configs\\)''\\); print\\([row for row in cursor.fetchall\\(\\)]\\); conn.close\\(\\)\")",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\":*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(.venv/Scripts/python.exe:*)"
+    ]
+  }
+}

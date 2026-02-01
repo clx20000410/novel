@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>拯救小说家</title>
+
+    <!-- Preconnect to Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <!-- Literary Elegance Theme Fonts -->
+    <!-- Noto Serif SC - 中文衬线字体（标题） -->
+    <!-- Source Serif Pro - 英文衬线字体（标题） -->
+    <!-- JetBrains Mono - 等宽字体（代码/标签） -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Source+Serif+Pro:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/src/assets/main.css">
+
+    <!-- Theme initialization script (prevents flash of unstyled content) -->
+    <script>
+      (function() {
+        try {
+          const saved = localStorage.getItem('novel-theme-mode');
+          let isDark = false;
+
+          if (saved === 'dark') {
+            isDark = true;
+          } else if (saved === 'system' || !saved) {
+            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          }
+
+          if (isDark) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.setAttribute('data-theme', 'light');
+          }
+        } catch (e) {
+          // Fallback to light theme
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+  </head>
+  <body class="bg-[var(--novel-background)] text-[var(--novel-on-background)] transition-colors duration-500">
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

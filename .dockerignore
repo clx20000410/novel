@@ -1,0 +1,103 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+README.md
+LICENSE
+CHANGELOG.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+backend/.env.example
+backend/.env
+frontend/.env.
+frontend/.env.example
+!deploy/Dockerfile
+deploy/docker-compose.yml
+deploy/docker-compose.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Frontend (已在 frontend/.dockerignore 中处理)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+
+# Backend (已在 backend/.dockerignore 中处理)
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/venv/
+backend/.venv/
+backend/env/
+backend/*.egg-info/
+backend/.pytest_cache/
+backend/db/*.db
+backend/*.sqlite3
+backend/storage/
+
+# Docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Test files
+**/tests/
+**/test/
+**/*test*.py
+**/*.test.js
+**/*.spec.js
+coverage/
+.coverage
+htmlcov/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# Local runtime artifacts
+storage/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Database dumps
+*.sql
+*.dump
+backups/
+
+# Uploads (如果有用户上传文件的目录)
+uploads/
+media/
+static/files/

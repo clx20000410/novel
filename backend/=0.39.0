@@ -1,0 +1,23 @@
+Collecting anthropic
+  Downloading anthropic-0.77.0-py3-none-any.whl.metadata (28 kB)
+Requirement already satisfied: anyio<5,>=3.5.0 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from anthropic) (4.12.1)
+Requirement already satisfied: distro<2,>=1.7.0 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from anthropic) (1.9.0)
+Collecting docstring-parser<1,>=0.15 (from anthropic)
+  Downloading docstring_parser-0.17.0-py3-none-any.whl.metadata (3.5 kB)
+Requirement already satisfied: httpx<1,>=0.25.0 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from anthropic) (0.28.1)
+Requirement already satisfied: jiter<1,>=0.4.0 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from anthropic) (0.12.0)
+Requirement already satisfied: pydantic<3,>=1.9.0 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from anthropic) (2.12.2)
+Requirement already satisfied: sniffio in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from anthropic) (1.3.1)
+Requirement already satisfied: typing-extensions<5,>=4.10 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from anthropic) (4.15.0)
+Requirement already satisfied: idna>=2.8 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from anyio<5,>=3.5.0->anthropic) (3.11)
+Requirement already satisfied: certifi in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from httpx<1,>=0.25.0->anthropic) (2026.1.4)
+Requirement already satisfied: httpcore==1.* in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from httpx<1,>=0.25.0->anthropic) (1.0.9)
+Requirement already satisfied: h11>=0.16 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from httpcore==1.*->httpx<1,>=0.25.0->anthropic) (0.16.0)
+Requirement already satisfied: annotated-types>=0.6.0 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from pydantic<3,>=1.9.0->anthropic) (0.7.0)
+Requirement already satisfied: pydantic-core==2.41.4 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from pydantic<3,>=1.9.0->anthropic) (2.41.4)
+Requirement already satisfied: typing-inspection>=0.4.2 in d:\0a-gitcode\arboris-novel-main\backend\.venv\lib\site-packages (from pydantic<3,>=1.9.0->anthropic) (0.4.2)
+Downloading anthropic-0.77.0-py3-none-any.whl (397 kB)
+Downloading docstring_parser-0.17.0-py3-none-any.whl (36 kB)
+Installing collected packages: docstring-parser, anthropic
+
+Successfully installed anthropic-0.77.0 docstring-parser-0.17.0

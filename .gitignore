@@ -1,0 +1,29 @@
+/.vscode
+.venv/
+/frontend/.vscode
+/frontend/node_modules
+/frontend/dist
+/backend/app/__pycache__/*.pyc
+*.pyc
+/backend/dist
+/backend/storage/*.db
+/backend/nul
+
+# 环境变量文件
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.test
+
+# 保留 .env.example
+!.env.example
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+*.db
