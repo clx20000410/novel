@@ -179,6 +179,22 @@ class LLMService:
                             full_response += part["content"]
                         if part.get("finish_reason"):
                             finish_reason = part["finish_reason"]
+
+                # 检查空响应，支持重试
+                if not full_response and attempt < total_attempts:
+                    backoff_seconds = min(1.0 * (2 ** (attempt - 1)), 8.0)
+                    logger.warning(
+                        "LLM returned empty response, retrying: attempt=%d/%d model=%s user_id=%s finish_reason=%s backoff=%.2fs",
+                        attempt,
+                        total_attempts,
+                        config.get("model"),
+                        user_id,
+                        finish_reason,
+                        backoff_seconds,
+                    )
+                    await asyncio.sleep(backoff_seconds)
+                    continue
+
                 break
             except InternalServerError as exc:
                 detail = "AI 服务内部错误，请稍后重试"
@@ -192,6 +208,23 @@ class LLMService:
                         detail = str(exc) or detail
                 else:
                     detail = str(exc) or detail
+
+                # InternalServerError (500) 支持重试
+                if attempt < total_attempts:
+                    backoff_seconds = min(1.0 * (2 ** (attempt - 1)), 8.0)
+                    logger.warning(
+                        "LLM stream internal error, retrying: attempt=%d/%d model=%s user_id=%s detail=%s backoff=%.2fs",
+                        attempt,
+                        total_attempts,
+                        config.get("model"),
+                        user_id,
+                        detail,
+                        backoff_seconds,
+                        exc_info=exc,
+                    )
+                    await asyncio.sleep(backoff_seconds)
+                    continue
+
                 logger.error(
                     "LLM stream internal error: model=%s user_id=%s detail=%s",
                     config.get("model"),
@@ -244,9 +277,12 @@ class LLMService:
                     detail = "AI 服务认证失败，请检查 API Key 是否正确"
                 elif exc.status_code == 400:
                     detail = "AI 服务请求参数不兼容，请检查模型/接口兼容性"
+                elif exc.status_code == 429:
+                    detail = "AI 服务请求频率限制，请稍后重试"
 
-                if exc.status_code in {502, 503, 504} and attempt < total_attempts:
-                    backoff_seconds = min(0.5 * (2 ** (attempt - 1)), 4.0)
+                # 所有 5xx 错误和 429 (rate limit) 都支持重试
+                if (exc.status_code >= 500 or exc.status_code == 429) and attempt < total_attempts:
+                    backoff_seconds = min(1.0 * (2 ** (attempt - 1)), 8.0)
                     logger.warning(
                         "LLM stream status error, retrying: attempt=%d/%d status=%s model=%s user_id=%s detail=%s backoff=%.2fs",
                         attempt,
@@ -271,6 +307,22 @@ class LLMService:
                 )
                 raise HTTPException(status_code=503, detail=detail) from exc
             except APIError as exc:
+                # APIError 也支持重试
+                if attempt < total_attempts:
+                    backoff_seconds = min(1.0 * (2 ** (attempt - 1)), 8.0)
+                    logger.warning(
+                        "LLM stream API error, retrying: attempt=%d/%d model=%s user_id=%s detail=%s backoff=%.2fs",
+                        attempt,
+                        total_attempts,
+                        config.get("model"),
+                        user_id,
+                        str(exc) or "unknown",
+                        backoff_seconds,
+                        exc_info=exc,
+                    )
+                    await asyncio.sleep(backoff_seconds)
+                    continue
+
                 logger.error(
                     "LLM stream API error: model=%s user_id=%s detail=%s",
                     config.get("model"),
@@ -307,9 +359,9 @@ class LLMService:
                 elif status_code >= 500:
                     detail = f"AI 服务内部错误 ({status_code})，请稍后重试或更换服务"
 
-                # 5xx 错误支持重试
-                if status_code >= 500 and attempt < total_attempts:
-                    backoff_seconds = min(0.5 * (2 ** (attempt - 1)), 4.0)
+                # 5xx 错误和 429 (rate limit) 支持重试
+                if (status_code >= 500 or status_code == 429) and attempt < total_attempts:
+                    backoff_seconds = min(1.0 * (2 ** (attempt - 1)), 8.0)
                     logger.warning(
                         "LLM stream HTTP error, retrying: attempt=%d/%d status=%s model=%s user_id=%s detail=%s backoff=%.2fs",
                         attempt,

@@ -99,10 +99,10 @@ class Settings(BaseSettings):
     )
     openai_model_name: str = Field(default="gpt-4o-mini", env="OPENAI_MODEL_NAME", description="默认 LLM 模型名称")
     llm_stream_max_retries: int = Field(
-        default=1,
+        default=3,
         ge=0,
         env="LLM_STREAM_MAX_RETRIES",
-        description="LLM 流式调用在断流/超时等可重试错误下的最大重试次数（不含首次）",
+        description="LLM 流式调用在断流/超时/服务器错误下的最大重试次数（不含首次）",
     )
     llm_stream_read_timeout_seconds: float = Field(
         default=1800.0,

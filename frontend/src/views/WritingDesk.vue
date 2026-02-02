@@ -575,48 +575,53 @@ const generateChapter = async (chapterNumber: number) => {
     return
   }
 
-  try {
-    generatingChapter.value = chapterNumber
-    selectedChapterNumber.value = chapterNumber
+  // 重试配置
+  const maxRetries = 3
+  const baseDelay = 3000 // 3秒基础延迟
 
-    // 在本地更新章节状态为generating
-    if (project.value?.chapters) {
-      const chapter = project.value.chapters.find(ch => ch.chapter_number === chapterNumber)
-      if (chapter) {
-        chapter.generation_status = 'generating'
-      } else {
-        // If chapter does not exist, create a temporary one to show generating state
-        const outline = project.value.blueprint?.chapter_outline?.find(o => o.chapter_number === chapterNumber)
-        project.value.chapters.push({
-          chapter_number: chapterNumber,
-          title: outline?.title || '加载中...',
-          summary: outline?.summary || '',
-          content: '',
-          versions: [],
-          evaluation: null,
-          generation_status: 'generating'
-        } as Chapter)
-      }
-    }
-
-    await novelStore.generateChapter(chapterNumber)
-
-    // 强制刷新该章节（避免某些情况下 UI 未及时拿到 versions/status）
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      await novelStore.loadChapter(chapterNumber)
-      await nextTick()
-    } catch (error) {
-      console.warn('生成后刷新章节失败:', error)
-    }
+      generatingChapter.value = chapterNumber
+      selectedChapterNumber.value = chapterNumber
 
-    // store 中的 project 已经被更新，所以我们不需要手动修改本地状态
-    // chapterGenerationResult 也不再需要，因为 availableVersions 会从更新后的 project.chapters 中获取数据
-    // showVersionSelector is now a computed property and will update automatically.
-    chapterGenerationResult.value = null
-    selectedVersionIndex.value = 0
+      // 在本地更新章节状态为generating
+      if (project.value?.chapters) {
+        const chapter = project.value.chapters.find(ch => ch.chapter_number === chapterNumber)
+        if (chapter) {
+          chapter.generation_status = 'generating'
+        } else {
+          // If chapter does not exist, create a temporary one to show generating state
+          const outline = project.value.blueprint?.chapter_outline?.find(o => o.chapter_number === chapterNumber)
+          project.value.chapters.push({
+            chapter_number: chapterNumber,
+            title: outline?.title || '加载中...',
+            summary: outline?.summary || '',
+            content: '',
+            versions: [],
+            evaluation: null,
+            generation_status: 'generating'
+          } as Chapter)
+        }
+      }
 
-    // 自动模式处理：生成完成后自动选择最佳版本
-    if (autoMode.value && !isBatchGenerating.value) {
+      await novelStore.generateChapter(chapterNumber)
+
+      // 强制刷新该章节（避免某些情况下 UI 未及时拿到 versions/status）
+      try {
+        await novelStore.loadChapter(chapterNumber)
+        await nextTick()
+      } catch (error) {
+        console.warn('生成后刷新章节失败:', error)
+      }
+
+      // store 中的 project 已经被更新，所以我们不需要手动修改本地状态
+      // chapterGenerationResult 也不再需要，因为 availableVersions 会从更新后的 project.chapters 中获取数据
+      // showVersionSelector is now a computed property and will update automatically.
+      chapterGenerationResult.value = null
+      selectedVersionIndex.value = 0
+
+      // 自动模式处理：生成完成后自动选择最佳版本
+      if (autoMode.value && !isBatchGenerating.value) {
       // 等待 Vue 响应式更新完成
       await nextTick()
 
@@ -710,10 +715,26 @@ const generateChapter = async (chapterNumber: number) => {
         console.warn('自动模式：没有找到可用版本', { updatedChapter })
       }
     }
-  } catch (error) {
-    console.error('生成章节失败:', error)
 
-    // 错误状态的本地更新仍然是必要的，以立即反映UI
+    // 生成成功，退出重试循环
+    generatingChapter.value = null
+    break
+  } catch (error) {
+    console.error(`生成章节失败 (尝试 ${attempt}/${maxRetries}):`, error)
+
+    // 自动模式下，如果还有重试次数，进行重试
+    if (attempt < maxRetries && autoMode.value) {
+      const delay = baseDelay * Math.pow(2, attempt - 1) // 指数退避: 3s, 6s, 12s
+      globalAlert.showWarning(
+        `生成章节失败，${delay / 1000}秒后自动重试 (${attempt}/${maxRetries})`,
+        '自动重试'
+      )
+      generatingChapter.value = null // 暂时清除生成状态
+      await new Promise(resolve => setTimeout(resolve, delay))
+      continue // 继续下一次重试
+    }
+
+    // 重试用尽或非自动模式，设置失败状态
     if (project.value?.chapters) {
       const chapter = project.value.chapters.find(ch => ch.chapter_number === chapterNumber)
       if (chapter) {
@@ -721,9 +742,12 @@ const generateChapter = async (chapterNumber: number) => {
       }
     }
 
-    globalAlert.showError(`生成章节失败: ${error instanceof Error ? error.message : '未知错误'}`, '生成失败')
-  } finally {
+    globalAlert.showError(
+      `生成章节失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      '生成失败'
+    )
     generatingChapter.value = null
+  }
   }
 }
 
@@ -844,7 +868,13 @@ const saveChapterChanges = async (updatedChapter: ChapterOutline) => {
 
 const evaluateChapter = async (chapterNumber?: number, skipAutoSelect: boolean = false): Promise<boolean> => {
   const targetChapterNumber = chapterNumber ?? selectedChapterNumber.value
-  if (targetChapterNumber !== null) {
+  if (targetChapterNumber === null) return false
+
+  // 重试配置
+  const maxRetries = 3
+  const baseDelay = 2000 // 2秒基础延迟
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     // 保存原始状态，用于失败时恢复
     let previousStatus: "not_generated" | "generating" | "evaluating" | "selecting" | "failed" | "evaluation_failed" | "waiting_for_confirm" | "successful" | undefined
 
@@ -947,7 +977,7 @@ const evaluateChapter = async (chapterNumber?: number, skipAutoSelect: boolean =
 
       return true
     } catch (error) {
-      console.error('评审章节失败:', error)
+      console.error(`评审章节失败 (尝试 ${attempt}/${maxRetries}):`, error)
 
       // 错误状态下恢复章节状态为原始状态
       if (project.value?.chapters) {
@@ -957,6 +987,16 @@ const evaluateChapter = async (chapterNumber?: number, skipAutoSelect: boolean =
         }
       }
 
+      // 如果还有重试次数，且自动模式开启，则重试
+      if (attempt < maxRetries && autoMode.value) {
+        const delay = baseDelay * Math.pow(2, attempt - 1) // 指数退避：2s, 4s, 8s
+        console.log(`评审失败，${delay / 1000}秒后重试 (${attempt}/${maxRetries})...`)
+        globalAlert.showWarning(`评审失败，${delay / 1000}秒后自动重试 (${attempt}/${maxRetries})`, '自动重试')
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+
+      // 重试次数用尽
       globalAlert.showError(`评审章节失败: ${error instanceof Error ? error.message : '未知错误'}`, '评审失败')
       return false
     }
