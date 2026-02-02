@@ -7,16 +7,21 @@ import router from '@/router'
 export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8000'
 export const API_PREFIX = '/api'
 
+const LONG_RUNNING_REQUEST_TIMEOUT_MS = 30 * 60 * 1000
+
+type RequestOptions = RequestInit & { timeoutMs?: number }
+
 // 统一的请求处理函数
-const request = async (url: string, options: RequestInit = {}) => {
+const request = async (url: string, options: RequestOptions = {}) => {
   const authStore = useAuthStore()
+  const { timeoutMs, signal: externalSignal, ...fetchOptions } = options
   const headers = new Headers({
     'Content-Type': 'application/json',
-    ...options.headers
+    ...fetchOptions.headers
   })
 
   // 如果 body 是 FormData，删除 Content-Type header，让浏览器自动设置（包含 boundary）
-  if (options.body instanceof FormData) {
+  if (fetchOptions.body instanceof FormData) {
     headers.delete('Content-Type')
   }
 
@@ -24,7 +29,26 @@ const request = async (url: string, options: RequestInit = {}) => {
     headers.set('Authorization', `Bearer ${authStore.token}`)
   }
 
-  const response = await fetch(url, { ...options, headers })
+  const controller = new AbortController()
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  const onExternalAbort = () => controller.abort(externalSignal?.reason)
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason)
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+    }
+  }
+
+  if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+    timeoutHandle = setTimeout(() => controller.abort(new Error('请求超时')), timeoutMs)
+  }
+
+  const response = await fetch(url, { ...fetchOptions, headers, signal: controller.signal }).finally(() => {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort)
+  })
 
   if (response.status === 401) {
     // Token 失效或未授权
@@ -265,6 +289,7 @@ export class NovelAPI {
     return request(`${NOVELS_BASE}/${projectId}/blueprint/generate`, {
       method: 'POST',
       signal: options.signal,
+      timeoutMs: LONG_RUNNING_REQUEST_TIMEOUT_MS
     })
   }
 
@@ -278,14 +303,16 @@ export class NovelAPI {
   static async generateChapter(projectId: string, chapterNumber: number): Promise<NovelProject> {
     return request(`${WRITER_BASE}/${projectId}/chapters/generate`, {
       method: 'POST',
-      body: JSON.stringify({ chapter_number: chapterNumber })
+      body: JSON.stringify({ chapter_number: chapterNumber }),
+      timeoutMs: LONG_RUNNING_REQUEST_TIMEOUT_MS
     })
   }
 
   static async evaluateChapter(projectId: string, chapterNumber: number): Promise<NovelProject> {
     return request(`${WRITER_BASE}/${projectId}/chapters/evaluate`, {
       method: 'POST',
-      body: JSON.stringify({ chapter_number: chapterNumber })
+      body: JSON.stringify({ chapter_number: chapterNumber }),
+      timeoutMs: LONG_RUNNING_REQUEST_TIMEOUT_MS
     })
   }
 
@@ -299,7 +326,8 @@ export class NovelAPI {
       body: JSON.stringify({
         chapter_number: chapterNumber,
         version_index: versionIndex
-      })
+      }),
+      timeoutMs: LONG_RUNNING_REQUEST_TIMEOUT_MS
     })
   }
 

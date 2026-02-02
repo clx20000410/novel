@@ -669,7 +669,7 @@ async def generate_chapter(
                 conversation_history=[{"role": "user", "content": final_prompt_input}],
                 temperature=0.9,
                 user_id=current_user.id,
-                timeout=600.0,
+                timeout=settings.chapter_generation_timeout_seconds,
                 response_format=None,
             )
             cleaned = remove_think_tags(response)
@@ -895,11 +895,11 @@ async def evaluate_chapter(
     llm_service = LLMService(session)
 
     project = await novel_service.ensure_project_owner(project_id, current_user.id)
-    # 确保预加载 selected_version 关系
+    # 确保预加载 versions / selected_version 关系
     from sqlalchemy.orm import selectinload
     stmt = (
         select(Chapter)
-        .options(selectinload(Chapter.selected_version))
+        .options(selectinload(Chapter.selected_version), selectinload(Chapter.versions))
         .where(
             Chapter.project_id == project_id,
             Chapter.chapter_number == request.chapter_number,
@@ -911,30 +911,16 @@ async def evaluate_chapter(
     if not chapter:
         chapter = await novel_service.get_or_create_chapter(project_id, request.chapter_number)
 
-    # 如果没有选中版本，使用最新版本进行评审
-    version_to_evaluate = chapter.selected_version
-    if not version_to_evaluate:
-        # 获取该章节的所有版本，选择最新的一个
-        from sqlalchemy.orm import selectinload
-        stmt_versions = (
-            select(Chapter)
-            .options(selectinload(Chapter.versions))
-            .where(
-                Chapter.project_id == project_id,
-                Chapter.chapter_number == request.chapter_number,
-            )
-        )
-        result_versions = await session.execute(stmt_versions)
-        chapter_with_versions = result_versions.scalars().first()
-        
-        if not chapter_with_versions or not chapter_with_versions.versions:
-            raise HTTPException(status_code=400, detail="该章节还没有生成任何版本，无法进行评审")
-        
-        # 使用最新的版本（列表中的最后一个）
-        version_to_evaluate = chapter_with_versions.versions[-1]
-    
-    if not version_to_evaluate or not version_to_evaluate.content:
-        raise HTTPException(status_code=400, detail="版本内容为空，无法进行评审")
+    versions_to_evaluate = [
+        v.content
+        for v in sorted(chapter.versions or [], key=lambda item: item.created_at)
+        if v.content and len(v.content.strip()) > 0
+    ]
+    if not versions_to_evaluate and chapter.selected_version and chapter.selected_version.content:
+        versions_to_evaluate = [chapter.selected_version.content]
+
+    if not versions_to_evaluate:
+        raise HTTPException(status_code=400, detail="该章节还没有生成任何版本，无法进行评审")
 
     chapter.status = "evaluating"
     await session.commit()
@@ -945,20 +931,54 @@ async def evaluate_chapter(
         # 使用 add_chapter_evaluation 创建评审记录
         await novel_service.add_chapter_evaluation(
             chapter=chapter,
-            version=version_to_evaluate,
+            version=None,
             feedback="未配置评审提示词",
             decision="skipped"
         )
         return await _load_project_schema(novel_service, project_id, current_user.id)
 
+    outlines_map = {item.chapter_number: item for item in project.outlines}
+    outline = outlines_map.get(request.chapter_number)
+    chapter_title = outline.title if outline and outline.title else f"第{request.chapter_number}章"
+
+    completed_chapters = []
+    for existing in sorted(project.chapters, key=lambda item: item.chapter_number):
+        if existing.chapter_number >= request.chapter_number:
+            continue
+        if not existing.selected_version or not existing.selected_version.content:
+            continue
+        existing_outline = outlines_map.get(existing.chapter_number)
+        completed_chapters.append(
+            {
+                "chapter_number": existing.chapter_number,
+                "title": (existing_outline.title if existing_outline and existing_outline.title else f"第{existing.chapter_number}章"),
+                "summary": existing.real_summary or (existing_outline.summary if existing_outline else ""),
+            }
+        )
+
+    project_schema = await novel_service._serialize_project(project)
+    blueprint_dict = project_schema.blueprint.model_dump() if project_schema.blueprint else {}
+
+    evaluation_input = json.dumps(
+        {
+            "novel_blueprint": blueprint_dict,
+            "completed_chapters": completed_chapters,
+            "content_to_evaluate": {
+                "chapter_title": chapter_title,
+                "versions": versions_to_evaluate,
+            },
+        },
+        ensure_ascii=False,
+    )
+
     try:
         evaluation_raw = await llm_service.get_llm_response(
             system_prompt=eval_prompt,
-            conversation_history=[{"role": "user", "content": version_to_evaluate.content}],
+            conversation_history=[{"role": "user", "content": evaluation_input}],
             temperature=0.3,
             user_id=current_user.id,
         )
-        evaluation_text = remove_think_tags(evaluation_raw)
+        evaluation_text = unwrap_markdown_json(remove_think_tags(evaluation_raw))
         
         # 校验 AI 返回的内容不为空
         if not evaluation_text or len(evaluation_text.strip()) == 0:
@@ -968,7 +988,7 @@ async def evaluate_chapter(
         # 这会自动设置状态为 WAITING_FOR_CONFIRM
         await novel_service.add_chapter_evaluation(
             chapter=chapter,
-            version=version_to_evaluate,
+            version=None,
             feedback=evaluation_text,
             decision="reviewed"
         )
@@ -996,7 +1016,7 @@ async def evaluate_chapter(
             from app.models.novel import ChapterEvaluation
             evaluation_record = ChapterEvaluation(
                 chapter_id=chapter.id,
-                version_id=version_to_evaluate.id,
+                version_id=None,
                 decision="failed",
                 feedback=f"评审失败: {str(exc)}",
                 score=None

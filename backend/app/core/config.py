@@ -105,7 +105,7 @@ class Settings(BaseSettings):
         description="LLM 流式调用在断流/超时等可重试错误下的最大重试次数（不含首次）",
     )
     llm_stream_read_timeout_seconds: float = Field(
-        default=600.0,
+        default=1800.0,
         gt=0,
         env="LLM_STREAM_READ_TIMEOUT_SECONDS",
         description="LLM 流式调用的读取超时（空闲）秒数，用于避免长时间无输出导致请求卡住",
@@ -121,6 +121,12 @@ class Settings(BaseSettings):
         gt=0,
         env="BLUEPRINT_GENERATION_TIMEOUT_SECONDS",
         description="生成蓝图接口的整体超时秒数（越大越不易超时，但会占用更久的请求连接）",
+    )
+    chapter_generation_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        env="CHAPTER_GENERATION_TIMEOUT_SECONDS",
+        description="生成章节接口的整体超时秒数（越大越不易超时，但会占用更久的请求连接）",
     )
     writer_chapter_versions: int = Field(
         default=2,

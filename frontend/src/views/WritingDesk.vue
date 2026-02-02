@@ -70,11 +70,10 @@
           @select-chapter="selectChapter"
           @generate-chapter="generateChapter"
           @edit-chapter="openEditChapterModal"
-          @delete-chapter="deleteChapter"
           @generate-outline="generateOutline"
           @batch-generate="showBatchGenerateModalHandler"
           @stop-batch-generate="stopBatchGenerate"
-        />
+          />
 
         <div class="desk-workspace">
           <WDWorkspace
@@ -136,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNovelStore } from '@/stores/novel'
 import type { Chapter, ChapterOutline, ChapterGenerationResponse, ChapterVersion } from '@/api/novel'
@@ -294,6 +293,86 @@ const cleanVersionContent = (content: string): string => {
   return cleaned
 }
 
+const parseEvaluationJson = (evaluation: string | null): unknown | null => {
+  if (!evaluation) return null
+
+  const stripCodeFence = (text: string) =>
+    text.replace(/```(?:json|javascript|typescript|js|ts)?\s*/g, '').replace(/```/g, '').trim()
+
+  const tryParse = (text: string): unknown | null => {
+    try {
+      return JSON.parse(text)
+    } catch {
+      return null
+    }
+  }
+
+  const raw = stripCodeFence(evaluation)
+  const direct = tryParse(raw)
+  if (direct) return direct
+
+  // 常见情况：内容被二次转义或夹杂了额外文本
+  const unescaped = raw
+    .replace(/\\n/g, '\n')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
+    .replace(/\\\\/g, '\\')
+
+  const unescapedParsed = tryParse(unescaped)
+  if (unescapedParsed) return unescapedParsed
+
+  const tryExtractObject = (text: string): unknown | null => {
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start === -1 || end === -1 || end <= start) return null
+    return tryParse(text.slice(start, end + 1))
+  }
+
+  return tryExtractObject(raw) ?? tryExtractObject(unescaped)
+}
+
+const resolveBestVersionIndexFromEvaluation = (evaluation: string | null, versionsCount: number): number => {
+  if (versionsCount <= 0) return 0
+
+  const parsed = parseEvaluationJson(evaluation) as { best_choice?: unknown } | null
+  const bestChoiceRaw = parsed?.best_choice
+  const bestChoice = typeof bestChoiceRaw === 'number' ? bestChoiceRaw : Number.parseInt(String(bestChoiceRaw), 10)
+
+  if (!Number.isFinite(bestChoice)) return 0
+  const clamped = Math.min(Math.max(bestChoice, 1), versionsCount)
+  return clamped - 1
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const waitForChapterVersions = async (
+  chapterNumber: number,
+  options: { timeoutMs?: number } = {}
+): Promise<{ versionsCount: number } | null> => {
+  const timeoutMs = options.timeoutMs ?? 15000
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const chapter = project.value?.chapters?.find(ch => ch.chapter_number === chapterNumber)
+    const versionsCount = chapter?.versions?.length || 0
+
+    if (versionsCount > 0) {
+      return { versionsCount }
+    }
+
+    try {
+      await novelStore.loadChapter(chapterNumber)
+    } catch (error) {
+      console.warn('等待章节版本时刷新章节失败:', error)
+    }
+
+    await nextTick()
+    await sleep(300)
+  }
+
+  return null
+}
+
 const canGenerateChapter = (chapterNumber: number) => {
   if (!project.value?.blueprint?.chapter_outline) return false
 
@@ -333,51 +412,78 @@ const hasChapterInProgress = (chapterNumber: number) => {
   return chapter && chapter.generation_status === 'waiting_for_confirm'
 }
 
+const extractVersionContent = (raw: string): string => {
+  if (!raw) return ''
+
+  const tryParse = (text: string): unknown | null => {
+    try {
+      return JSON.parse(text)
+    } catch {
+      return null
+    }
+  }
+
+  const extractContent = (value: any): string | null => {
+    if (!value) return null
+    if (typeof value === 'string') return value
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const nested = extractContent(item)
+        if (nested) return nested
+      }
+      return null
+    }
+    if (typeof value === 'object') {
+      for (const key of ['content', 'chapter_content', 'chapter_text', 'text', 'body', 'story']) {
+        if (value[key]) {
+          const nested = extractContent(value[key])
+          if (nested) return nested
+        }
+      }
+    }
+    return null
+  }
+
+  const trimmed = raw.trim()
+
+  // 仅在“看起来像 JSON”的情况下尝试解析，避免对正常正文报错/刷屏
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    || (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    const parsed = tryParse(trimmed)
+    const extracted = extractContent(parsed)
+    if (extracted) return extracted
+  }
+
+  // 兼容旧数据：正文被二次 JSON stringify 成字符串（通常含转义符）
+  if (
+    trimmed.startsWith('"')
+    && trimmed.endsWith('"')
+    && /\\\\[nrt"\\\\]/.test(trimmed)
+  ) {
+    const parsed = tryParse(trimmed)
+    if (typeof parsed === 'string') return parsed
+  }
+
+  return raw
+}
+
 // 可用版本列表 (合并生成结果和已有版本)
 const availableVersions = computed(() => {
   // 优先使用新生成的版本（对象数组格式）
   if (chapterGenerationResult.value?.versions) {
-    console.log('使用生成结果版本:', chapterGenerationResult.value.versions)
     return chapterGenerationResult.value.versions
   }
 
   // 使用章节已有的版本（字符串数组格式，需要转换为对象数组）
-  if (selectedChapter.value?.versions && Array.isArray(selectedChapter.value.versions)) {
-    console.log('原始章节版本 (字符串数组):', selectedChapter.value.versions)
-
-    // 将字符串数组转换为ChapterVersion对象数组
-    const convertedVersions = selectedChapter.value.versions.map((versionString, index) => {
-      console.log(`版本 ${index} 原始字符串:`, versionString)
-
-      try {
-        // 解析JSON字符串
-        const versionObj = JSON.parse(versionString)
-        console.log(`版本 ${index} 解析后的对象:`, versionObj)
-
-        // 提取content字段作为实际内容
-        const actualContent = versionObj.content || versionString
-
-        console.log(`版本 ${index} 实际内容:`, actualContent.substring(0, 100) + '...')
-
-        return {
-          content: actualContent,
-          style: '标准' // 默认风格
-        }
-      } catch (error) {
-        // 如果JSON解析失败，直接使用原始字符串
-        console.log(`版本 ${index} JSON解析失败，使用原始字符串:`, error)
-        return {
-          content: versionString,
-          style: '标准'
-        }
-      }
-    })
-
-    console.log('转换后的版本对象:', convertedVersions)
-    return convertedVersions
+  if (Array.isArray(selectedChapter.value?.versions)) {
+    return selectedChapter.value.versions.map(versionString => ({
+      content: extractVersionContent(versionString),
+      style: '标准'
+    }))
   }
 
-  console.log('没有可用版本，selectedChapter:', selectedChapter.value)
   return []
 })
 
@@ -495,6 +601,14 @@ const generateChapter = async (chapterNumber: number) => {
 
     await novelStore.generateChapter(chapterNumber)
 
+    // 强制刷新该章节（避免某些情况下 UI 未及时拿到 versions/status）
+    try {
+      await novelStore.loadChapter(chapterNumber)
+      await nextTick()
+    } catch (error) {
+      console.warn('生成后刷新章节失败:', error)
+    }
+
     // store 中的 project 已经被更新，所以我们不需要手动修改本地状态
     // chapterGenerationResult 也不再需要，因为 availableVersions 会从更新后的 project.chapters 中获取数据
     // showVersionSelector is now a computed property and will update automatically.
@@ -503,35 +617,62 @@ const generateChapter = async (chapterNumber: number) => {
 
     // 自动模式处理：生成完成后自动选择最佳版本
     if (autoMode.value && !isBatchGenerating.value) {
+      // 等待 Vue 响应式更新完成
+      await nextTick()
+
       // 从更新后的章节数据中获取版本信息
       const updatedChapter = project.value?.chapters?.find(
         ch => ch.chapter_number === chapterNumber
       )
 
-      if (updatedChapter?.versions && updatedChapter.versions.length > 0) {
-        // 查找 AI 推荐的最佳版本索引
-        let bestVersionIndex = 0
+      const ready = await waitForChapterVersions(chapterNumber, { timeoutMs: 20000 })
+      const versionsCount = ready?.versionsCount ?? (updatedChapter?.versions?.length || 0)
 
-        for (let i = 0; i < updatedChapter.versions.length; i++) {
-          try {
-            const versionData = JSON.parse(updatedChapter.versions[i])
-            if (versionData.ai_review?.is_best === true) {
-              bestVersionIndex = i
-              console.log(`AI 推荐最佳版本: 版本 ${i + 1}`)
-              break
-            }
-          } catch (e) {
-            // 解析失败，继续检查下一个版本
+      if (versionsCount > 0) {
+        // 1) 生成完成后先调用 AI 评审（多版本对比）
+        // skipAutoSelect: true 因为 generateChapter 本身已经处理自动选择逻辑
+        await nextTick()
+        const evaluated = await evaluateChapter(chapterNumber, true)
+        if (!evaluated || !autoMode.value) return
+
+        await nextTick()
+        const evaluatedChapter = project.value?.chapters?.find(ch => ch.chapter_number === chapterNumber)
+        const bestVersionIndex = resolveBestVersionIndexFromEvaluation(evaluatedChapter?.evaluation || null, versionsCount)
+
+        console.log(`自动模式：评审完成，推荐选择版本 ${bestVersionIndex + 1}，共 ${versionsCount} 个版本`)
+
+        // 使用 nextTick 确保响应式系统完全更新
+        await nextTick()
+
+        // 执行自动选择
+        try {
+          // 验证 availableVersions 是否已准备好
+          if (!availableVersions.value || availableVersions.value.length === 0) {
+            console.warn('自动模式：等待版本数据加载...')
+            // 等待一小段时间让数据加载
+            await new Promise(resolve => setTimeout(resolve, 300))
+            await nextTick()
           }
-        }
 
-        console.log(`自动模式：选择版本 ${bestVersionIndex + 1}`)
+          // 再次检查版本数据
+          if (!availableVersions.value?.[bestVersionIndex]?.content) {
+            console.error('自动模式：版本数据未准备好', {
+              availableVersions: availableVersions.value,
+              selectedChapterNumber: selectedChapterNumber.value,
+              chapterNumber
+            })
+            globalAlert.showError('自动选择失败：版本数据未准备好，请手动选择', '自动选择失败')
+            return
+          }
 
-        // 延迟执行自动选择，确保 UI 更新完成
-        setTimeout(async () => {
-          try {
-            await selectVersion(bestVersionIndex)
-            globalAlert.showSuccess(`已自动选择 AI 推荐的版本 ${bestVersionIndex + 1}`, '自动选择')
+          const selectSuccess = await selectVersionWithResult(bestVersionIndex)
+
+          if (selectSuccess) {
+            globalAlert.showSuccess(`已自动选择版本 ${bestVersionIndex + 1}`, '自动选择')
+
+            // 刷新项目数据以确保 UI 完全同步
+            await novelStore.loadProject(props.id)
+            await nextTick()
 
             // 选择成功后，自动生成下一章
             const nextChapterNumber = chapterNumber + 1
@@ -547,16 +688,26 @@ const generateChapter = async (chapterNumber: number) => {
 
               if (nextChapterStatus === 'not_generated') {
                 console.log(`自动开始生成第 ${nextChapterNumber} 章`)
-                setTimeout(() => {
-                  generateChapter(nextChapterNumber)
-                }, 1000)
+                if (!autoMode.value) return
+                await nextTick()
+                await generateChapter(nextChapterNumber)
+              } else {
+                console.log(`第 ${nextChapterNumber} 章状态为 ${nextChapterStatus}，跳过自动生成`)
               }
+            } else {
+              console.log('没有更多章节需要生成')
+              globalAlert.showSuccess('所有章节已完成！', '自动模式完成')
             }
-          } catch (selectError) {
-            console.error('自动选择版本失败:', selectError)
+          } else {
+            console.error('自动选择版本失败：selectVersion 返回失败')
             globalAlert.showError('自动选择版本失败，请手动选择', '自动选择失败')
           }
-        }, 500)
+        } catch (selectError) {
+          console.error('自动选择版本失败:', selectError)
+          globalAlert.showError('自动选择版本失败，请手动选择', '自动选择失败')
+        }
+      } else {
+        console.warn('自动模式：没有找到可用版本', { updatedChapter })
       }
     }
   } catch (error) {
@@ -617,6 +768,52 @@ const selectVersion = async (versionIndex: number) => {
   }
 }
 
+// 带返回值的版本选择函数，供自动模式使用
+const selectVersionWithResult = async (versionIndex: number): Promise<boolean> => {
+  if (selectedChapterNumber.value === null) {
+    console.error('selectVersionWithResult: selectedChapterNumber 为 null')
+    return false
+  }
+
+  if (!availableVersions.value?.[versionIndex]?.content) {
+    console.error('selectVersionWithResult: 版本内容不存在', {
+      versionIndex,
+      availableVersionsLength: availableVersions.value?.length,
+      hasContent: !!availableVersions.value?.[versionIndex]?.content
+    })
+    return false
+  }
+
+  try {
+    // 在本地立即更新状态以反映UI
+    if (project.value?.chapters) {
+      const chapter = project.value.chapters.find(ch => ch.chapter_number === selectedChapterNumber.value)
+      if (chapter) {
+        chapter.generation_status = 'selecting'
+      }
+    }
+
+    selectedVersionIndex.value = versionIndex
+    await novelStore.selectChapterVersion(selectedChapterNumber.value, versionIndex)
+
+    // 等待 Vue 响应式更新完成，确保 UI 正确反映状态变化
+    await nextTick()
+
+    chapterGenerationResult.value = null
+    return true
+  } catch (error) {
+    console.error('selectVersionWithResult 失败:', error)
+    // 错误状态下恢复章节状态
+    if (project.value?.chapters) {
+      const chapter = project.value.chapters.find(ch => ch.chapter_number === selectedChapterNumber.value)
+      if (chapter) {
+        chapter.generation_status = 'waiting_for_confirm'
+      }
+    }
+    return false
+  }
+}
+
 // 从详情弹窗中选择版本
 const selectVersionFromDetail = async () => {
   selectedVersionIndex.value = detailVersionIndex.value
@@ -645,59 +842,127 @@ const saveChapterChanges = async (updatedChapter: ChapterOutline) => {
   }
 }
 
-const evaluateChapter = async () => {
-  if (selectedChapterNumber.value !== null) {
+const evaluateChapter = async (chapterNumber?: number, skipAutoSelect: boolean = false): Promise<boolean> => {
+  const targetChapterNumber = chapterNumber ?? selectedChapterNumber.value
+  if (targetChapterNumber !== null) {
     // 保存原始状态，用于失败时恢复
     let previousStatus: "not_generated" | "generating" | "evaluating" | "selecting" | "failed" | "evaluation_failed" | "waiting_for_confirm" | "successful" | undefined
-    
+
     try {
       // 在本地更新章节状态为evaluating以立即反映在UI上
       if (project.value?.chapters) {
-        const chapter = project.value.chapters.find(ch => ch.chapter_number === selectedChapterNumber.value)
+        const chapter = project.value.chapters.find(ch => ch.chapter_number === targetChapterNumber)
         if (chapter) {
           previousStatus = chapter.generation_status // 保存原状态
           chapter.generation_status = 'evaluating'
         }
       }
-      await novelStore.evaluateChapter(selectedChapterNumber.value)
-      
+      await novelStore.evaluateChapter(targetChapterNumber)
+      try {
+        await novelStore.loadChapter(targetChapterNumber)
+      } catch (error) {
+        console.warn('评审后刷新章节失败:', error)
+      }
+
       // 评审完成后，状态会通过store和轮询更新，这里不需要额外操作
       globalAlert.showSuccess('章节评审结果已生成', '评审成功')
+
+      // 自动模式处理：评审完成后自动选择最佳版本并生成下一章
+      if (autoMode.value && !isBatchGenerating.value && !skipAutoSelect) {
+        await nextTick()
+
+        const evaluatedChapter = project.value?.chapters?.find(ch => ch.chapter_number === targetChapterNumber)
+        const versionsCount = evaluatedChapter?.versions?.length || 0
+
+        if (versionsCount > 0) {
+          const bestVersionIndex = resolveBestVersionIndexFromEvaluation(evaluatedChapter?.evaluation || null, versionsCount)
+          console.log(`自动模式（评审后）：推荐选择版本 ${bestVersionIndex + 1}，共 ${versionsCount} 个版本`)
+
+          // 确保 selectedChapterNumber 正确设置
+          selectedChapterNumber.value = targetChapterNumber
+          await nextTick()
+
+          // 等待版本数据加载
+          if (!availableVersions.value || availableVersions.value.length === 0) {
+            console.warn('自动模式：等待版本数据加载...')
+            await new Promise(resolve => setTimeout(resolve, 300))
+            await nextTick()
+          }
+
+          // 检查版本数据是否准备好
+          if (!availableVersions.value?.[bestVersionIndex]?.content) {
+            console.error('自动模式：版本数据未准备好', {
+              availableVersions: availableVersions.value,
+              selectedChapterNumber: selectedChapterNumber.value,
+              targetChapterNumber
+            })
+            globalAlert.showError('自动选择失败：版本数据未准备好，请手动选择', '自动选择失败')
+            return true
+          }
+
+          try {
+            const selectSuccess = await selectVersionWithResult(bestVersionIndex)
+
+            if (selectSuccess) {
+              globalAlert.showSuccess(`已自动选择版本 ${bestVersionIndex + 1}`, '自动选择')
+
+              // 刷新项目数据
+              await novelStore.loadProject(props.id)
+              await nextTick()
+
+              // 自动生成下一章
+              const nextChapterNumber = targetChapterNumber + 1
+              const hasNextChapter = project.value?.blueprint?.chapter_outline?.some(
+                o => o.chapter_number === nextChapterNumber
+              )
+
+              if (hasNextChapter) {
+                const nextChapter = project.value?.chapters?.find(
+                  ch => ch.chapter_number === nextChapterNumber
+                )
+                const nextChapterStatus = nextChapter?.generation_status || 'not_generated'
+
+                if (nextChapterStatus === 'not_generated') {
+                  console.log(`自动开始生成第 ${nextChapterNumber} 章`)
+                  if (!autoMode.value) return true
+                  await nextTick()
+                  await generateChapter(nextChapterNumber)
+                } else {
+                  console.log(`第 ${nextChapterNumber} 章状态为 ${nextChapterStatus}，跳过自动生成`)
+                }
+              } else {
+                console.log('没有更多章节需要生成')
+                globalAlert.showSuccess('所有章节已完成！', '自动模式完成')
+              }
+            } else {
+              console.error('自动选择版本失败：selectVersion 返回失败')
+              globalAlert.showError('自动选择版本失败，请手动选择', '自动选择失败')
+            }
+          } catch (selectError) {
+            console.error('自动选择版本失败:', selectError)
+            globalAlert.showError('自动选择版本失败，请手动选择', '自动选择失败')
+          }
+        }
+      }
+
+      return true
     } catch (error) {
       console.error('评审章节失败:', error)
-      
+
       // 错误状态下恢复章节状态为原始状态
       if (project.value?.chapters) {
-        const chapter = project.value.chapters.find(ch => ch.chapter_number === selectedChapterNumber.value)
+        const chapter = project.value.chapters.find(ch => ch.chapter_number === targetChapterNumber)
         if (chapter && previousStatus) {
           chapter.generation_status = previousStatus // 恢复为原状态
         }
       }
-      
+
       globalAlert.showError(`评审章节失败: ${error instanceof Error ? error.message : '未知错误'}`, '评审失败')
+      return false
     }
   }
-}
 
-const deleteChapter = async (chapterNumbers: number | number[]) => {
-  const numbersToDelete = Array.isArray(chapterNumbers) ? chapterNumbers : [chapterNumbers]
-  const confirmationMessage = numbersToDelete.length > 1
-    ? `您确定要删除选中的 ${numbersToDelete.length} 个章节吗？这个操作无法撤销。`
-    : `您确定要删除第 ${numbersToDelete[0]} 章吗？这个操作无法撤销。`
-
-  if (window.confirm(confirmationMessage)) {
-    try {
-      await novelStore.deleteChapter(numbersToDelete)
-      globalAlert.showSuccess('章节已删除', '操作成功')
-      // If the currently selected chapter was deleted, unselect it
-      if (selectedChapterNumber.value && numbersToDelete.includes(selectedChapterNumber.value)) {
-        selectedChapterNumber.value = null
-      }
-    } catch (error) {
-      console.error('删除章节失败:', error)
-      globalAlert.showError(`删除章节失败: ${error instanceof Error ? error.message : '未知错误'}`, '删除失败')
-    }
-  }
+  return false
 }
 
 const generateOutline = async () => {

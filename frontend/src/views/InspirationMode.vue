@@ -26,18 +26,21 @@
 
             <h1 class="novel-display welcome-title">开启你的灵感之旅</h1>
             <p class="novel-body welcome-subtitle">
-              准备好释放你的创造力了吗？让 AI 引导你，一步步构建出独一无二的故事世界。
+              {{ isCheckingActiveProject ? '正在检查是否有未完成的灵感...' : '准备好释放你的创造力了吗？让 AI 引导你，一步步构建出独一无二的故事世界。' }}
             </p>
 
             <button
               @click="startConversation"
-              :disabled="novelStore.isLoading"
+              :disabled="novelStore.isLoading || isCheckingActiveProject"
               class="novel-btn novel-btn-filled welcome-btn"
             >
-              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg v-if="isCheckingActiveProject" class="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <svg v-else class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
               </svg>
-              {{ novelStore.isLoading ? '正在准备...' : '开启灵感模式' }}
+              {{ isCheckingActiveProject ? '检查中...' : (novelStore.isLoading ? '正在准备...' : '开启灵感模式') }}
             </button>
 
             <button @click="goBack" class="novel-btn novel-btn-ghost mt-4">
@@ -131,6 +134,7 @@
         :ai-message="confirmationMessage"
         @blueprint-generated="handleBlueprintGenerated"
         @back="backToConversation"
+        @restart="handleRestartFromConfirmation"
       />
 
       <!-- Blueprint Display -->
@@ -168,6 +172,7 @@ const novelStore = useNovelStore()
 
 const conversationStarted = ref(false)
 const isInitialLoading = ref(false)
+const isCheckingActiveProject = ref(true) // 检查活跃项目时的加载状态
 const showBlueprintConfirmation = ref(false)
 const showBlueprint = ref(false)
 const chatMessages = ref<ChatMessage[]>([])
@@ -185,6 +190,7 @@ const goBack = () => {
 const resetInspirationMode = () => {
   conversationStarted.value = false
   isInitialLoading.value = false
+  isCheckingActiveProject.value = false
   showBlueprintConfirmation.value = false
   showBlueprint.value = false
   chatMessages.value = []
@@ -217,6 +223,11 @@ const backToConversation = () => {
   showBlueprintConfirmation.value = false
 }
 
+const handleRestartFromConfirmation = async () => {
+  // 直接开启新灵感（确认对话框已经在 BlueprintConfirmation 组件中显示过了）
+  await startConversationInternal({ forceNew: true })
+}
+
 const startConversationInternal = async (options: { forceNew?: boolean } = {}) => {
   resetInspirationMode()
   conversationStarted.value = true
@@ -245,6 +256,7 @@ const startConversation = async (_event?: MouseEvent) => {
 }
 
 const restoreConversation = async (projectId: string) => {
+  isCheckingActiveProject.value = true
   try {
     await novelStore.loadProject(projectId)
     const project = novelStore.currentProject
@@ -255,6 +267,35 @@ const restoreConversation = async (projectId: string) => {
     if (project?.status === 'concept_abandoned') {
       globalAlert.showError('该灵感已被放弃，无法继续。', '无法继续')
       resetInspirationMode()
+      return
+    }
+    // 特殊处理：concept_complete 状态应该直接进入蓝图确认界面
+    if (project?.status === 'concept_complete') {
+      conversationStarted.value = true
+      // 尝试恢复聊天记录用于显示
+      if (project.conversation_history && project.conversation_history.length > 0) {
+        chatMessages.value = project.conversation_history.map((item): ChatMessage | null => {
+          if (item.role === 'user') {
+            try {
+              const userInput = JSON.parse(item.content)
+              return { content: userInput.value, type: 'user' }
+            } catch {
+              return { content: item.content, type: 'user' }
+            }
+          } else {
+            try {
+              const assistantOutput = JSON.parse(item.content)
+              return { content: assistantOutput.ai_message, type: 'ai' }
+            } catch {
+              return { content: item.content, type: 'ai' }
+            }
+          }
+        }).filter((msg): msg is ChatMessage => msg !== null && msg.content !== null)
+        currentTurn.value = project.conversation_history.filter(m => m.role === 'assistant').length
+      }
+      // 直接显示蓝图确认界面
+      confirmationMessage.value = '灵感对话已完成！请点击下方按钮生成小说蓝图，或者点击右上角重新开始。'
+      showBlueprintConfirmation.value = true
       return
     }
     if (project && project.conversation_history) {
@@ -286,13 +327,19 @@ const restoreConversation = async (projectId: string) => {
 
       const lastAssistantMsgStr = project.conversation_history.filter(m => m.role === 'assistant').pop()?.content
       if (lastAssistantMsgStr) {
-        const lastAssistantMsg = JSON.parse(lastAssistantMsgStr)
+        try {
+          const lastAssistantMsg = JSON.parse(lastAssistantMsgStr)
 
-        if (lastAssistantMsg.is_complete) {
-          confirmationMessage.value = lastAssistantMsg.ai_message
-          showBlueprintConfirmation.value = true
-        } else {
-          currentUIControl.value = lastAssistantMsg.ui_control
+          if (lastAssistantMsg.is_complete) {
+            confirmationMessage.value = lastAssistantMsg.ai_message
+            showBlueprintConfirmation.value = true
+          } else {
+            currentUIControl.value = lastAssistantMsg.ui_control
+          }
+        } catch (parseError) {
+          console.warn('解析最后一条AI消息失败:', parseError)
+          // 如果对话数据损坏但状态是进行中，允许继续对话
+          // currentUIControl 保持为 null，用户可以自由输入
         }
       }
       currentTurn.value = project.conversation_history.filter(m => m.role === 'assistant').length
@@ -302,6 +349,8 @@ const restoreConversation = async (projectId: string) => {
     console.error('恢复对话失败:', error)
     globalAlert.showError(`无法恢复对话: ${error instanceof Error ? error.message : '未知错误'}`, '加载失败')
     resetInspirationMode()
+  } finally {
+    isCheckingActiveProject.value = false
   }
 }
 
@@ -412,6 +461,7 @@ const scrollToBottom = async () => {
 }
 
 const restoreActiveInspiration = async () => {
+  isCheckingActiveProject.value = true
   try {
     const response = await NovelAPI.getActiveInspiration()
     const project = response.project
@@ -422,6 +472,8 @@ const restoreActiveInspiration = async () => {
     }
   } catch (error) {
     console.error('加载灵感记录失败:', error)
+  } finally {
+    isCheckingActiveProject.value = false
   }
   resetInspirationMode()
 }
@@ -755,6 +807,20 @@ onMounted(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* Spin animation for loading state */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Responsive */

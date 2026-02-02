@@ -114,25 +114,29 @@
     </div>
 
     <!-- 操作按钮 -->
-    <div v-else class="text-center space-x-4">
-      <!-- <button
-        @click="$emit('back')"
-        class="bg-gray-200 text-gray-700 font-bold py-3 px-8 rounded-full hover:bg-gray-300 transition-all duration-300 transform hover:scale-105"
-      >
-        返回对话
-      </button> -->
-      <button
-        @click="generateBlueprint"
-        :disabled="isGenerating"
-        class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-8 rounded-full hover:from-indigo-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-      >
-        <span class="flex items-center justify-center">
-          <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"></path>
-          </svg>
-          开始创建蓝图
-        </span>
-      </button>
+    <div v-else class="text-center space-y-4">
+      <div class="space-x-4">
+        <button
+          @click="generateBlueprint"
+          :disabled="isGenerating"
+          class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-8 rounded-full hover:from-indigo-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+        >
+          <span class="flex items-center justify-center">
+            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"></path>
+            </svg>
+            开始创建蓝图
+          </span>
+        </button>
+      </div>
+      <div>
+        <button
+          @click="handleRestart"
+          class="text-sm text-gray-500 hover:text-gray-700 underline transition-colors"
+        >
+          放弃当前灵感，开启新灵感
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -158,6 +162,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   blueprintGenerated: [response: any]
   back: []
+  restart: []
 }>()
 
 const novelStore = useNovelStore()
@@ -223,6 +228,16 @@ const cancelGeneration = () => {
   abortController = null
   isGenerating.value = false
   globalAlert.showAlert('已取消生成蓝图。', 'info', '已取消')
+}
+
+const handleRestart = async () => {
+  const confirmed = await globalAlert.showConfirm(
+    '确定要放弃当前灵感并开启新灵感吗？放弃后该灵感将不可继续。',
+    '开启新灵感确认'
+  )
+  if (confirmed) {
+    emit('restart')
+  }
 }
 
 const generateBlueprint = async () => {

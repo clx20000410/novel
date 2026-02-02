@@ -102,25 +102,13 @@
                   @click="$emit('selectChapter', chapter.chapter_number)"
                   :class="[
                     'group relative cursor-pointer p-4 pr-12 m3-chapter-card m3-stagger',
-                    selectedForDeletion.includes(chapter.chapter_number)
-                      ? 'm3-chapter-danger'
-                      : selectedChapterNumber === chapter.chapter_number
+                    selectedChapterNumber === chapter.chapter_number
                       ? 'm3-chapter-selected md-elevation-1'
                       : 'hover:md-elevation-1'
                   ]"
                   :style="{ animationDelay: `${index * 40}ms` }"
                 >
                   <div class="flex items-start gap-3">
-                    <div class="flex-shrink-0 pt-1">
-                      <input
-                        v-if="!isChapterCompleted(chapter.chapter_number)"
-                        type="checkbox"
-                        :disabled="isChapterCompleted(chapter.chapter_number)"
-                        :checked="selectedForDeletion.includes(chapter.chapter_number)"
-                        @click.stop="toggleSelection(chapter.chapter_number)"
-                        class="h-4 w-4 rounded border-[var(--md-outline)] text-[var(--md-primary)] focus:ring-[var(--md-primary)] disabled:opacity-50 accent-[var(--md-primary)]"
-                      />
-                    </div>
                     <div
                       :class="[
                         'w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0',
@@ -210,18 +198,6 @@
               </svg>
               <p>暂无章节大纲</p>
             </div>
-            <div v-if="selectedForDeletion.length > 0" class="mt-4">
-              <button
-                @click="handleDeleteSelected"
-                class="md-btn md-btn-filled md-ripple w-full flex items-center justify-center gap-2"
-                style="background-color: var(--md-error); color: var(--md-on-error);"
-              >
-                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd"></path>
-                </svg>
-                <span>删除选中的 {{ selectedForDeletion.length }} 章</span>
-              </button>
-            </div>
             <!-- 批量生成按钮和进度显示 -->
             <div v-if="props.project.blueprint?.chapter_outline?.length" class="mt-4">
               <div v-if="props.isBatchGenerating && props.batchGeneratingProgress" class="md-card md-card-filled p-4" style="background-color: var(--md-primary-container); border-radius: var(--md-radius-md);">
@@ -304,9 +280,8 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const emit = defineEmits(['closeSidebar', 'selectChapter', 'generateChapter', 'editChapter', 'deleteChapter', 'generateOutline', 'batchGenerate', 'stopBatchGenerate'])
+const emit = defineEmits(['closeSidebar', 'selectChapter', 'generateChapter', 'editChapter', 'generateOutline', 'batchGenerate', 'stopBatchGenerate'])
 
-const selectedForDeletion = ref<number[]>([])
 const listContainer = ref<HTMLElement | null>(null)
 const chapterRefs = ref<Record<number, HTMLElement | null>>({})
 const activeTab = ref<'completed' | 'incomplete'>('incomplete')
@@ -317,13 +292,6 @@ const characterCount = computed(() => {
 
 const relationshipCount = computed(() => {
   return props.project?.blueprint?.relationships?.length || 0
-})
-
-const lastChapterNumber = computed(() => {
-  if (!props.project?.blueprint?.chapter_outline || props.project.blueprint.chapter_outline.length === 0) {
-    return null
-  }
-  return Math.max(...props.project.blueprint.chapter_outline.map(ch => ch.chapter_number))
 })
 
 const totalChapters = computed(() => {
@@ -356,38 +324,6 @@ const getChapterTitle = (chapter: ChapterOutline) => {
 
 const getChapterTooltipText = (chapter: ChapterOutline) => {
   return `${getChapterNumberLabel(chapter.chapter_number)} ${getChapterTitle(chapter)}`
-}
-
-function toggleSelection(chapterNumber: number) {
-  if (isChapterCompleted(chapterNumber)) return
-  const index = selectedForDeletion.value.indexOf(chapterNumber)
-  if (index > -1) {
-    selectedForDeletion.value.splice(index, 1)
-  } else {
-    selectedForDeletion.value.push(chapterNumber)
-  }
-}
-
-function handleDeleteSelected() {
-  if (selectedForDeletion.value.length === 0) return
-
-  const sortedSelection = [...selectedForDeletion.value].sort((a, b) => a - b)
-
-  if (!lastChapterNumber.value || !sortedSelection.includes(lastChapterNumber.value)) {
-    alert('批量删除必须包含最后一章。')
-    return
-  }
-
-  const isContinuous = sortedSelection.every((num, i) => {
-    return i === 0 || num === sortedSelection[i - 1] + 1
-  })
-  if (!isContinuous) {
-    alert('只能删除连续的章节块。')
-    return
-  }
-
-  emit('deleteChapter', sortedSelection)
-  selectedForDeletion.value = []
 }
 
 async function confirmGenerateChapter(chapterNumber: number) {
@@ -485,11 +421,6 @@ const canGenerateChapter = (chapterNumber: number) => {
 .m3-chapter-selected {
   border-color: var(--md-primary);
   background-color: var(--md-primary-container);
-}
-
-.m3-chapter-danger {
-  border-color: var(--md-error);
-  background-color: var(--md-error-container);
 }
 
 .m3-stagger {
