@@ -3,7 +3,9 @@
 """多格式 LLM 工具封装，支持 OpenAI Chat/Responses、Anthropic、Google API。"""
 
 import json
+import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import AsyncGenerator, Dict, List, Optional, Any, Literal
@@ -11,8 +13,32 @@ from typing import AsyncGenerator, Dict, List, Optional, Any, Literal
 import httpx
 from openai import AsyncOpenAI
 
+logger = logging.getLogger(__name__)
+
 
 ApiFormatType = Literal["openai_chat", "openai_responses", "anthropic", "google"]
+
+DEFAULT_GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def normalize_google_base_url(base_url: Optional[str]) -> str:
+    """规范化 Google API base_url，确保包含版本前缀且不带 models 路径。"""
+    url = (base_url or "").strip()
+    if not url:
+        return DEFAULT_GOOGLE_BASE_URL
+
+    url = url.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    url = re.sub(r"/models(?:/.*)?$", "", url)
+
+    match = re.search(r"/v1beta(?=/|$)", url)
+    if match:
+        return url[:match.end()]
+
+    match = re.search(r"/v1(?=/|$)", url)
+    if match:
+        return url[:match.end()]
+
+    return f"{url}/v1beta"
 
 
 @dataclass
@@ -385,10 +411,10 @@ class GoogleClient(BaseLLMClient):
         if not key:
             raise ValueError("缺少 GOOGLE_API_KEY 配置，请在数据库或环境变量中补全。")
 
-        resolved_base_url = (
+        resolved_base_url = normalize_google_base_url(
             base_url
             or os.environ.get("GOOGLE_BASE_URL")
-            or "https://generativelanguage.googleapis.com/v1beta"
+            or DEFAULT_GOOGLE_BASE_URL
         )
         super().__init__(key, resolved_base_url)
 
@@ -407,7 +433,7 @@ class GoogleClient(BaseLLMClient):
         target_model = model or os.environ.get("GOOGLE_MODEL", "gemini-1.5-flash")
 
         # 构建 URL
-        base = self.base_url.rstrip("/") if self.base_url else "https://generativelanguage.googleapis.com/v1beta"
+        base = normalize_google_base_url(self.base_url)
         url = f"{base}/models/{target_model}:streamGenerateContent?alt=sse&key={self.api_key}"
 
         # 转换消息格式
@@ -458,12 +484,19 @@ class GoogleClient(BaseLLMClient):
         else:
             request_timeout = timeout
 
+        # 记录请求信息（隐藏 API Key）
+        safe_url = url.replace(self.api_key, "***") if self.api_key else url
+        logger.info("Google API 请求: url=%s body_keys=%s", safe_url, list(body.keys()))
+
         async with httpx.AsyncClient(timeout=request_timeout) as http:
             async with http.stream("POST", url, json=body) as response:
+                logger.info("Google API 响应状态: status=%d headers=%s", response.status_code, dict(response.headers))
+
                 # 检查响应状态，如果出错则读取完整响应体以获取错误详情
                 if response.status_code >= 400:
                     error_body = await response.aread()
                     error_detail = f"HTTP {response.status_code}"
+                    logger.error("Google API 错误响应: status=%d body=%s", response.status_code, error_body.decode("utf-8", errors="replace")[:1000])
                     try:
                         error_json = json.loads(error_body)
                         if isinstance(error_json, dict):
@@ -481,21 +514,45 @@ class GoogleClient(BaseLLMClient):
                         response=response,
                     )
 
+                line_count = 0
                 async for line in response.aiter_lines():
-                    if not line or not line.startswith("data: "):
+                    line_count += 1
+                    # 记录前几行原始响应用于调试
+                    if line_count <= 5:
+                        logger.info("Google API 原始行 #%d: %s", line_count, line[:500] if line else "(empty)")
+
+                    if not line:
                         continue
 
-                    data_str = line[6:]  # 去掉 "data: " 前缀
+                    # 支持带或不带 "data: " 前缀的格式
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                    else:
+                        # 尝试直接解析 JSON（某些代理可能不使用 SSE 格式）
+                        data_str = line
+
                     if not data_str or data_str == "[DONE]":
                         continue
 
                     try:
                         data = json.loads(data_str)
                     except json.JSONDecodeError:
+                        logger.info("Google API JSON 解析失败: %s", data_str[:500])
                         continue
+
+                    # 记录解析后的数据结构
+                    if line_count <= 3:
+                        logger.info("Google API 解析数据: keys=%s", list(data.keys()) if isinstance(data, dict) else type(data))
 
                     candidates = data.get("candidates", [])
                     if not candidates:
+                        # 检查是否有其他格式的响应
+                        if "text" in data:
+                            yield {"content": data["text"], "finish_reason": None}
+                            continue
+                        if "content" in data:
+                            yield {"content": data["content"], "finish_reason": None}
+                            continue
                         continue
 
                     candidate = candidates[0]
@@ -520,6 +577,8 @@ class GoogleClient(BaseLLMClient):
                         }
                         finish_reason = finish_reason_map.get(finish_reason_raw, "stop")
                         yield {"content": "", "finish_reason": finish_reason}
+
+                logger.info("Google API 流结束: 共处理 %d 行", line_count)
 
 
 def create_llm_client(

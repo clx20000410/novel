@@ -15,7 +15,7 @@ from ..repositories.user_repository import UserRepository
 from ..services.admin_setting_service import AdminSettingService
 from ..services.prompt_service import PromptService
 from ..services.usage_service import UsageService
-from ..utils.llm_tool import ChatMessage, LLMClient, create_llm_client
+from ..utils.llm_tool import ChatMessage, LLMClient, create_llm_client, normalize_google_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -478,24 +478,25 @@ class LLMService:
         return full_response
 
     async def _resolve_llm_config(self, user_id: Optional[int]) -> Dict[str, Optional[str]]:
-        if user_id:
-            config = await self.llm_repo.get_by_user(user_id)
-            if config and config.llm_provider_api_key:
-                return {
-                    "api_key": config.llm_provider_api_key,
-                    "base_url": config.llm_provider_url,
-                    "model": config.llm_provider_model,
-                    "api_format": getattr(config, "api_format", "openai_responses"),
-                }
+        active_config = await self.llm_repo.get_active_config(user_id) if user_id else None
+        active_api_key = (active_config.llm_provider_api_key or "").strip() if active_config else ""
+        active_base_url = active_config.llm_provider_url if active_config and active_config.llm_provider_url else None
+        active_model = active_config.llm_provider_model if active_config and active_config.llm_provider_model else None
+        active_api_format = getattr(active_config, "api_format", None) if active_config else None
 
-        # 检查每日使用次数限制
-        if user_id:
+        system_api_key = await self._get_config_value("llm.api_key")
+        system_base_url = await self._get_config_value("llm.base_url")
+        system_model = await self._get_config_value("llm.model")
+        system_api_format = await self._get_config_value("llm.api_format") or "openai_responses"
+
+        api_key = active_api_key or system_api_key
+        base_url = active_base_url or system_base_url
+        model = active_model or system_model
+        api_format = active_api_format or system_api_format or "openai_responses"
+
+        # 使用系统 API Key 时，执行日次数限制
+        if user_id and not active_api_key:
             await self._enforce_daily_limit(user_id)
-
-        api_key = await self._get_config_value("llm.api_key")
-        base_url = await self._get_config_value("llm.base_url")
-        model = await self._get_config_value("llm.model")
-        api_format = await self._get_config_value("llm.api_format") or "openai_responses"
 
         if not api_key:
             logger.error("未配置默认 LLM API Key，且用户 %s 未设置自定义 API Key", user_id)
@@ -513,14 +514,23 @@ class LLMService:
         user_id: Optional[int] = None,
         model: Optional[str] = None,
     ) -> List[float]:
-        """生成文本向量，用于章节 RAG 检索，支持 openai 与 ollama 双提供方。"""
+        """生成文本向量，用于章节 RAG 检索，支持 openai、ollama、google、anthropic 多提供方。"""
         provider = await self._get_config_value("embedding.provider") or "openai"
-        default_model = (
-            await self._get_config_value("ollama.embedding_model") or "nomic-embed-text:latest"
-            if provider == "ollama"
-            else await self._get_config_value("embedding.model") or "text-embedding-3-large"
-        )
+
+        # 获取用户 LLM 配置，用于判断 api_format
+        config = await self._resolve_llm_config(user_id)
+        api_format = config.get("api_format", "openai_chat")
+
+        # 根据 api_format 确定默认嵌入模型
+        if provider == "ollama":
+            default_model = await self._get_config_value("ollama.embedding_model") or "nomic-embed-text:latest"
+        elif api_format == "google":
+            default_model = await self._get_config_value("embedding.model") or "text-embedding-004"
+        else:
+            default_model = await self._get_config_value("embedding.model") or "text-embedding-3-large"
         target_model = model or default_model
+
+        embedding: Optional[List[float]] = None
 
         if provider == "ollama":
             if OllamaAsyncClient is None:
@@ -543,7 +553,6 @@ class LLMService:
                     exc_info=True,
                 )
                 return []
-            embedding: Optional[List[float]]
             if isinstance(response, dict):
                 embedding = response.get("embedding")
             else:
@@ -551,32 +560,25 @@ class LLMService:
             if not embedding:
                 logger.warning("Ollama 返回空向量: model=%s", target_model)
                 return []
-            if not isinstance(embedding, list):
-                embedding = list(embedding)
+
+        elif api_format == "google":
+            # Google Gemini 嵌入接口
+            embedding = await self._get_google_embedding(text, target_model, config)
+
+        elif api_format == "anthropic":
+            # Anthropic 不提供官方嵌入 API，回退到 OpenAI 兼容接口
+            logger.warning(
+                "Anthropic 不提供嵌入 API，尝试使用 OpenAI 兼容接口: user_id=%s",
+                user_id,
+            )
+            embedding = await self._get_openai_embedding(text, target_model, config, user_id)
+
         else:
-            config = await self._resolve_llm_config(user_id)
-            api_key = await self._get_config_value("embedding.api_key") or config["api_key"]
-            base_url = await self._get_config_value("embedding.base_url") or config.get("base_url")
-            client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-            try:
-                response = await client.embeddings.create(
-                    input=text,
-                    model=target_model,
-                )
-            except Exception as exc:  # pragma: no cover - 网络或鉴权失败
-                logger.error(
-                    "OpenAI 嵌入请求失败: model=%s base_url=%s user_id=%s error=%s",
-                    target_model,
-                    base_url,
-                    user_id,
-                    exc,
-                    exc_info=True,
-                )
-                return []
-            if not response.data:
-                logger.warning("OpenAI 嵌入请求返回空数据: model=%s user_id=%s", target_model, user_id)
-                return []
-            embedding = response.data[0].embedding
+            # OpenAI 及兼容接口 (openai_chat, openai_responses)
+            embedding = await self._get_openai_embedding(text, target_model, config, user_id)
+
+        if embedding is None:
+            return []
 
         if not isinstance(embedding, list):
             embedding = list(embedding)
@@ -589,6 +591,98 @@ class LLMService:
         if dimension:
             self._embedding_dimensions[target_model] = dimension
         return embedding
+
+    async def _get_openai_embedding(
+        self,
+        text: str,
+        model: str,
+        config: Dict[str, Optional[str]],
+        user_id: Optional[int],
+    ) -> Optional[List[float]]:
+        """通过 OpenAI 兼容接口获取嵌入向量。"""
+        api_key = config["api_key"] or await self._get_config_value("embedding.api_key")
+        base_url = config.get("base_url") or await self._get_config_value("embedding.base_url")
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        try:
+            response = await client.embeddings.create(
+                input=text,
+                model=model,
+            )
+        except Exception as exc:  # pragma: no cover - 网络或鉴权失败
+            logger.error(
+                "OpenAI 嵌入请求失败: model=%s base_url=%s user_id=%s error=%s",
+                model,
+                base_url,
+                user_id,
+                exc,
+                exc_info=True,
+            )
+            return None
+        if not response.data:
+            logger.warning("OpenAI 嵌入请求返回空数据: model=%s user_id=%s", model, user_id)
+            return None
+        return response.data[0].embedding
+
+    async def _get_google_embedding(
+        self,
+        text: str,
+        model: str,
+        config: Dict[str, Optional[str]],
+    ) -> Optional[List[float]]:
+        """通过 Google Gemini API 获取嵌入向量。"""
+        api_key = config["api_key"]
+        base_url = normalize_google_base_url(config.get("base_url"))
+
+        # Google 嵌入端点: /models/{model}:embedContent
+        url = f"{base_url}/models/{model}:embedContent?key={api_key}"
+
+        body = {
+            "model": f"models/{model}",
+            "content": {
+                "parts": [{"text": text}]
+            }
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(url, json=body)
+                if response.status_code >= 400:
+                    error_detail = f"HTTP {response.status_code}"
+                    try:
+                        error_json = response.json()
+                        if isinstance(error_json, dict):
+                            error_data = error_json.get("error", {})
+                            if isinstance(error_data, dict):
+                                error_detail = error_data.get("message") or error_detail
+                    except Exception:
+                        error_detail = response.text[:500]
+                    logger.error(
+                        "Google 嵌入请求失败: model=%s base_url=%s error=%s",
+                        model,
+                        base_url,
+                        error_detail,
+                    )
+                    return None
+
+                data = response.json()
+                # Google 响应格式: {"embedding": {"values": [...]}}
+                embedding_data = data.get("embedding", {})
+                values = embedding_data.get("values", [])
+                if not values:
+                    logger.warning("Google 嵌入请求返回空数据: model=%s", model)
+                    return None
+                logger.info("Google 嵌入请求成功: model=%s dimension=%d", model, len(values))
+                return values
+
+        except Exception as exc:  # pragma: no cover - 网络或鉴权失败
+            logger.error(
+                "Google 嵌入请求异常: model=%s base_url=%s error=%s",
+                model,
+                base_url,
+                exc,
+                exc_info=True,
+            )
+            return None
 
     async def get_embedding_dimension(self, model: Optional[str] = None) -> Optional[int]:
         """获取嵌入向量维度，优先返回缓存结果，其次读取配置。"""

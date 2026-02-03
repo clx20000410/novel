@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 from ..services.llm_service import LLMService
 from ..services.prompt_service import PromptService
-from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
+from ..utils.json_utils import remove_think_tags, unwrap_markdown_json, parse_json_safely
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +137,8 @@ class AIReviewService:
 
     def _parse_review_response(self, response: str) -> ReviewResult:
         """解析评审响应"""
-        try:
-            data = json.loads(response)
+        data = parse_json_safely(response)
+        if isinstance(data, dict):
             return ReviewResult(
                 best_version_index=data.get("best_version_index", 0),
                 scores=data.get("scores", {}),
@@ -147,16 +147,16 @@ class AIReviewService:
                 refinement_suggestions=data.get("refinement_suggestions", ""),
                 final_recommendation=data.get("final_recommendation", ""),
             )
-        except json.JSONDecodeError:
-            logger.warning("评审响应不是有效 JSON，使用默认结果")
-            return ReviewResult(
-                best_version_index=0,
-                scores={},
-                overall_evaluation=response[:500] if response else "",
-                critical_flaws=[],
-                refinement_suggestions="",
-                final_recommendation="解析失败，建议人工审核",
-            )
+
+        logger.warning("评审响应不是有效 JSON，使用默认结果")
+        return ReviewResult(
+            best_version_index=0,
+            scores={},
+            overall_evaluation=response[:500] if response else "",
+            critical_flaws=[],
+            refinement_suggestions="",
+            final_recommendation="解析失败，建议人工审核",
+        )
 
     async def auto_select_best_version(
         self,
