@@ -148,7 +148,8 @@
 /* ============================================
    暗黑模式 - 夜灯书房 Midnight Study
    ============================================ */
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+:root.dark {
   /* 主色调 - 月光靛蓝 Moonlit Indigo */
   --novel-primary: #7B9FD4;
   --novel-primary-light: #A3BEE5;

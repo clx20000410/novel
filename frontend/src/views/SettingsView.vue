@@ -40,6 +40,17 @@
           <!-- Navigation items -->
           <nav class="sidebar-nav">
             <ul class="nav-list">
+              <!-- LLM settings -->
+              <li
+                :class="['nav-item', { 'nav-item-active': activeSection === 'llm' }]"
+                @click="activeSection = 'llm'"
+              >
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span class="nav-text">LLM 配置</span>
+              </li>
+
               <!-- Theme settings -->
               <li
                 :class="['nav-item', { 'nav-item-active': activeSection === 'theme' }]"
@@ -50,17 +61,6 @@
                 </svg>
                 <span class="nav-text">外观主题</span>
                 <span class="nav-badge" v-if="isDark">暗色</span>
-              </li>
-
-              <!-- LLM settings -->
-              <li
-                :class="['nav-item', { 'nav-item-active': activeSection === 'llm' }]"
-                @click="activeSection = 'llm'"
-              >
-                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                <span class="nav-text">LLM 配置</span>
               </li>
             </ul>
           </nav>
@@ -78,6 +78,11 @@
 
       <!-- Main settings area -->
       <main class="settings-main">
+        <!-- LLM settings section -->
+        <section v-if="activeSection === 'llm'" class="settings-section">
+          <LLMSettings />
+        </section>
+
         <!-- Theme settings section -->
         <section v-if="activeSection === 'theme'" class="settings-section">
           <div class="section-card">
@@ -157,10 +162,6 @@
           </div>
         </section>
 
-        <!-- LLM settings section -->
-        <section v-if="activeSection === 'llm'" class="settings-section">
-          <LLMSettings />
-        </section>
       </main>
     </div>
   </div>
@@ -173,7 +174,7 @@ import type { ThemeMode } from '@/composables/useTheme'
 import LLMSettings from '@/components/LLMSettings.vue'
 
 // Active section state
-const activeSection = ref<'theme' | 'llm'>('theme')
+const activeSection = ref<'theme' | 'llm'>('llm')
 
 // Use unified theme composable
 const { isDark, themeMode, isSystemMode, setThemeMode } = useTheme()

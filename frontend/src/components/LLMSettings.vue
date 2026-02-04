@@ -1,200 +1,245 @@
 <!-- AIMETA P=LLM设置_模型配置界面|R=LLM多配置管理|NR=不含模型调用|E=component:LLMSettings|X=internal|A=设置组件|D=vue|S=dom,net|RD=./README.ai -->
 <template>
-  <div class="bg-white/70 backdrop-blur-xl rounded-2xl shadow-lg p-8">
-    <div class="flex justify-between items-center mb-6">
-      <div>
-        <h2 class="text-2xl font-bold text-gray-800">LLM 配置管理</h2>
-        <p class="text-sm text-gray-500 mt-1">建议使用自己的中转 API 和 KEY</p>
-      </div>
-      <button
-        @click="openCreateDialog"
-        class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
-      >
-        <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-          <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
-        </svg>
-        新增配置
-      </button>
-    </div>
-
-    <!-- 加载状态 -->
-    <div v-if="isLoading" class="flex justify-center items-center py-12">
-      <svg class="animate-spin h-8 w-8 text-indigo-600" viewBox="0 0 24 24" fill="none">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-      </svg>
-    </div>
-
-    <!-- 空状态 -->
-    <div v-else-if="configs.length === 0" class="text-center py-12">
-      <svg class="mx-auto h-12 w-12 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-      </svg>
-      <h3 class="mt-2 text-lg font-medium text-gray-900">暂无配置</h3>
-      <p class="mt-1 text-sm text-gray-500">点击"新增配置"按钮创建您的第一个 LLM 配置</p>
-    </div>
-
-    <!-- 配置列表 -->
-    <div v-else class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      <div
-        v-for="config in configs"
-        :key="config.id"
-        :class="[
-          'relative bg-white rounded-xl border-2 p-5 transition-all cursor-pointer hover:shadow-md',
-          config.is_active ? 'border-indigo-500 shadow-md' : 'border-gray-200 hover:border-gray-300'
-        ]"
-      >
-        <!-- 激活标签 -->
-        <div
-          v-if="config.is_active"
-          class="absolute -top-2 -right-2 bg-indigo-500 text-white text-xs font-semibold px-2 py-1 rounded-full"
+  <div class="relative overflow-hidden rounded-2xl border border-[var(--novel-outline-variant)] bg-[var(--novel-surface)] shadow-[var(--novel-shadow-md)]">
+    <div class="absolute inset-0 bg-[var(--novel-paper-texture)] opacity-30 pointer-events-none"></div>
+    <div class="absolute inset-x-0 top-0 h-1 bg-[var(--novel-book-spine)]"></div>
+    <div class="relative p-8">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="space-y-1">
+          <p class="text-xs font-semibold tracking-wide text-[var(--novel-primary)]">LLM 配置</p>
+          <h2 class="text-2xl font-bold text-[var(--novel-on-surface)]">LLM 配置管理</h2>
+          <p class="text-sm text-[var(--novel-on-surface-variant)]">建议使用自己的中转 API 和 KEY</p>
+        </div>
+        <button
+          @click="openCreateDialog"
+          class="px-4 py-2 bg-[var(--novel-primary)] text-[var(--novel-on-primary)] rounded-lg hover:bg-[var(--novel-primary-dark)] transition-colors flex items-center gap-2"
         >
-          当前使用
+          <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
+          </svg>
+          新增配置
+        </button>
+      </div>
+
+      <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
+        <span class="px-2.5 py-1 rounded-full bg-[var(--novel-surface-container)] text-[var(--novel-on-surface)]">
+          共 {{ totalConfigs }} 个配置
+        </span>
+        <span
+          v-if="activeConfig"
+          class="px-2.5 py-1 rounded-full bg-[var(--novel-primary-container)] text-[var(--novel-on-primary-container)]"
+        >
+          当前使用：{{ activeConfig.name }}
+        </span>
+        <span
+          v-else
+          class="px-2.5 py-1 rounded-full bg-[var(--novel-surface-container)] text-[var(--novel-on-surface-variant)]"
+        >
+          暂无激活配置
+        </span>
+      </div>
+
+      <div class="mt-6">
+        <!-- 加载状态 -->
+        <div v-if="isLoading" class="flex flex-col items-center justify-center gap-3 py-12 text-[var(--novel-on-surface-variant)]">
+          <svg class="animate-spin h-8 w-8 text-[var(--novel-primary)]" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span class="text-sm">正在加载配置...</span>
         </div>
 
-        <!-- 配置信息 -->
-        <div class="mb-4">
-          <h3 class="text-lg font-semibold text-gray-800 truncate">{{ config.name }}</h3>
-          <div class="mt-2 space-y-1 text-sm text-gray-500">
-            <p class="truncate">
-              <span class="font-medium">接口格式:</span>
-              {{ getApiFormatLabel(config.api_format) }}
-            </p>
-            <p class="truncate" :title="config.llm_provider_url || '默认 URL'">
-              <span class="font-medium">URL:</span>
-              {{ config.llm_provider_url || '默认' }}
-            </p>
-            <p class="truncate">
-              <span class="font-medium">模型:</span>
-              {{ config.llm_provider_model || '默认' }}
-            </p>
-            <p class="truncate">
-              <span class="font-medium">API Key:</span>
-              {{ config.llm_provider_api_key ? maskApiKey(config.llm_provider_api_key) : '未设置' }}
-            </p>
+        <!-- 空状态 -->
+        <div
+          v-else-if="configs.length === 0"
+          class="rounded-2xl border border-[var(--novel-outline-variant)] bg-[var(--novel-surface-container)] px-6 py-10 text-center"
+        >
+          <svg class="mx-auto h-12 w-12 text-[var(--novel-on-surface-variant)] opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+          <h3 class="mt-3 text-lg font-medium text-[var(--novel-on-surface)]">暂无配置</h3>
+          <p class="mt-1 text-sm text-[var(--novel-on-surface-variant)]">点击“新增配置”创建您的第一个 LLM 配置</p>
+        </div>
+
+        <!-- 配置列表 -->
+        <div v-else class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div
+            v-for="config in configs"
+            :key="config.id"
+            :class="[
+              'group relative rounded-xl border bg-[var(--novel-surface)] p-5 transition-all',
+              config.is_active
+                ? 'border-[var(--novel-primary)] shadow-[var(--novel-shadow-md)]'
+                : 'border-[var(--novel-outline-variant)] hover:border-[var(--novel-outline)] hover:shadow-[var(--novel-shadow-sm)]'
+            ]"
+          >
+            <div v-if="config.is_active" class="absolute inset-x-0 top-0 h-0.5 bg-[var(--novel-primary)]"></div>
+
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h3 class="text-lg font-semibold text-[var(--novel-on-surface)] truncate">{{ config.name }}</h3>
+                <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span class="px-2.5 py-1 rounded-full bg-[var(--novel-surface-container)] text-[var(--novel-on-surface-variant)]">
+                    {{ getApiFormatLabel(config.api_format) }}
+                  </span>
+                </div>
+              </div>
+              <span
+                v-if="config.is_active"
+                class="shrink-0 rounded-full bg-[var(--novel-primary-container)] px-2.5 py-1 text-xs font-semibold text-[var(--novel-on-primary-container)]"
+              >
+                当前使用
+              </span>
+            </div>
+
+            <div class="mt-4 space-y-2 text-xs">
+              <div class="flex items-start gap-3">
+                <span class="min-w-[64px] text-[var(--novel-on-surface-variant)]">URL</span>
+                <span
+                  class="min-w-0 flex-1 truncate text-[var(--novel-on-surface)]"
+                  :title="config.llm_provider_url || '默认 URL'"
+                >
+                  {{ config.llm_provider_url || '默认' }}
+                </span>
+              </div>
+              <div class="flex items-start gap-3">
+                <span class="min-w-[64px] text-[var(--novel-on-surface-variant)]">模型</span>
+                <span class="min-w-0 flex-1 truncate text-[var(--novel-on-surface)]">
+                  {{ config.llm_provider_model || '默认' }}
+                </span>
+              </div>
+              <div class="flex items-start gap-3">
+                <span class="min-w-[64px] text-[var(--novel-on-surface-variant)]">API Key</span>
+                <span class="min-w-0 flex-1 truncate text-[var(--novel-on-surface)]">
+                  {{ config.llm_provider_api_key ? maskApiKey(config.llm_provider_api_key) : '未设置' }}
+                </span>
+              </div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--novel-outline-variant)] pt-4">
+              <button
+                v-if="!config.is_active"
+                @click="handleActivate(config)"
+                class="px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--novel-primary-container)] text-[var(--novel-on-primary-container)] hover:bg-[var(--novel-primary)] hover:text-[var(--novel-on-primary)] transition-colors"
+              >
+                激活
+              </button>
+              <button
+                @click="handleTestConnection(config)"
+                :disabled="isTestingConnection === config.id"
+                class="px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--novel-info-container)] text-[var(--novel-on-info-container)] hover:bg-[var(--novel-info)] hover:text-[var(--novel-on-info)] transition-colors disabled:bg-[var(--novel-surface-container)] disabled:text-[var(--novel-on-surface-variant)] disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <svg v-if="isTestingConnection === config.id" class="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>{{ isTestingConnection === config.id ? '测试中...' : '测活' }}</span>
+              </button>
+              <button
+                @click="openEditDialog(config)"
+                class="px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--novel-surface-container)] text-[var(--novel-on-surface)] hover:bg-[var(--novel-surface-container-high)] transition-colors"
+              >
+                编辑
+              </button>
+              <button
+                @click="handleDelete(config)"
+                class="px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--novel-error-container)] text-[var(--novel-on-error-container)] hover:bg-[var(--novel-error)] hover:text-[var(--novel-on-error)] transition-colors"
+              >
+                删除
+              </button>
+            </div>
+
+            <div
+              v-if="connectionTestResults[config.id]"
+              :class="[
+                'mt-3 px-3 py-2 rounded-md text-xs flex items-center gap-2',
+                connectionTestResults[config.id].success
+                  ? 'bg-[var(--novel-success-container)] text-[var(--novel-on-success-container)]'
+                  : 'bg-[var(--novel-error-container)] text-[var(--novel-on-error-container)]'
+              ]"
+            >
+              <svg v-if="connectionTestResults[config.id].success" class="w-4 h-4 text-[var(--novel-success)]" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+              </svg>
+              <svg v-else class="w-4 h-4 text-[var(--novel-error)]" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+              </svg>
+              <span class="flex-1 truncate">{{ connectionTestResults[config.id].message }}</span>
+              <button
+                @click="clearTestResult(config.id)"
+                class="text-[var(--novel-on-surface-variant)] hover:text-[var(--novel-on-surface)]"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
-
-        <!-- 操作按钮 -->
-        <div class="flex gap-2 pt-3 border-t border-gray-100">
-          <button
-            v-if="!config.is_active"
-            @click="handleActivate(config)"
-            class="flex-1 px-3 py-1.5 text-sm bg-indigo-100 text-indigo-700 rounded-md hover:bg-indigo-200 transition-colors"
-          >
-            激活
-          </button>
-          <button
-            @click="handleTestConnection(config)"
-            :disabled="isTestingConnection === config.id"
-            class="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded-md hover:bg-green-200 transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center gap-1"
-          >
-            <svg v-if="isTestingConnection === config.id" class="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span>{{ isTestingConnection === config.id ? '测试中...' : '测活' }}</span>
-          </button>
-          <button
-            @click="openEditDialog(config)"
-            class="flex-1 px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-          >
-            编辑
-          </button>
-          <button
-            @click="handleDelete(config)"
-            class="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded-md hover:bg-red-200 transition-colors"
-          >
-            删除
-          </button>
-        </div>
-
-        <!-- 测活结果显示 -->
-        <div
-          v-if="connectionTestResults[config.id]"
-          :class="[
-            'mt-3 px-3 py-2 rounded-md text-sm flex items-center gap-2',
-            connectionTestResults[config.id].success
-              ? 'bg-green-50 text-green-700'
-              : 'bg-red-50 text-red-700'
-          ]"
-        >
-          <svg v-if="connectionTestResults[config.id].success" class="w-4 h-4 text-green-500" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-          </svg>
-          <svg v-else class="w-4 h-4 text-red-500" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-          </svg>
-          <span class="flex-1 truncate">{{ connectionTestResults[config.id].message }}</span>
-          <button
-            @click="clearTestResult(config.id)"
-            class="text-gray-400 hover:text-gray-600"
-          >
-            <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-            </svg>
-          </button>
-        </div>
       </div>
     </div>
+  </div>
 
-    <!-- 创建/编辑弹窗 -->
-    <div
-      v-if="showDialog"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      @click.self="closeDialog"
-    >
-      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
-        <h3 class="text-xl font-bold text-gray-800 mb-6">
+  <!-- 创建/编辑弹窗 -->
+  <div
+    v-if="showDialog"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+    @click.self="closeDialog"
+  >
+    <div class="relative w-full max-w-lg mx-4 max-h-[90vh] overflow-hidden rounded-2xl border border-[var(--novel-outline-variant)] bg-[var(--novel-surface)] shadow-[var(--novel-shadow-lg)]">
+      <div class="absolute inset-0 bg-[var(--novel-paper-texture)] opacity-25 pointer-events-none"></div>
+      <div class="absolute inset-x-0 top-0 h-1 bg-[var(--novel-book-spine)]"></div>
+      <div class="relative max-h-[90vh] overflow-y-auto p-6">
+        <h3 class="text-xl font-bold text-[var(--novel-on-surface)] mb-6">
           {{ editingConfig ? '编辑配置' : '新增配置' }}
         </h3>
         <form @submit.prevent="handleSave" class="space-y-5">
           <!-- 配置名称 -->
           <div>
-            <label for="name" class="block text-sm font-medium text-gray-700">配置名称</label>
+            <label for="name" class="block text-sm font-medium text-[var(--novel-on-surface)]">配置名称</label>
             <input
               type="text"
               id="name"
               v-model="formData.name"
               required
               maxlength="64"
-              class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              class="mt-1 block w-full px-3 py-2 border border-[var(--novel-outline)] bg-[var(--novel-surface)] text-[var(--novel-on-surface)] placeholder:text-[var(--novel-on-surface-variant)] rounded-md shadow-sm focus:outline-none focus:ring-[var(--novel-primary)] focus:border-[var(--novel-primary)] sm:text-sm"
               placeholder="例如：DeepSeek、Claude..."
             >
           </div>
 
           <!-- 接口格式 -->
           <div>
-            <label for="api_format" class="block text-sm font-medium text-gray-700">接口格式</label>
+            <label for="api_format" class="block text-sm font-medium text-[var(--novel-on-surface)]">接口格式</label>
             <select
               id="api_format"
               v-model="formData.api_format"
-              class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              class="mt-1 block w-full px-3 py-2 border border-[var(--novel-outline)] bg-[var(--novel-surface)] text-[var(--novel-on-surface)] rounded-md shadow-sm focus:outline-none focus:ring-[var(--novel-primary)] focus:border-[var(--novel-primary)] sm:text-sm"
             >
               <option v-for="option in API_FORMAT_OPTIONS" :key="option.value" :value="option.value">
                 {{ option.label }}
               </option>
             </select>
-            <p class="mt-1 text-xs text-gray-500">
+            <p class="mt-1 text-xs text-[var(--novel-on-surface-variant)]">
               {{ getApiFormatDescription(formData.api_format) }}
             </p>
           </div>
 
           <!-- API URL -->
           <div>
-            <label for="url" class="block text-sm font-medium text-gray-700">API URL</label>
+            <label for="url" class="block text-sm font-medium text-[var(--novel-on-surface)]">API URL</label>
             <div class="relative mt-1">
               <input
                 type="text"
                 id="url"
                 v-model="formData.llm_provider_url"
-                class="block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                class="block w-full px-3 py-2 pr-10 border border-[var(--novel-outline)] bg-[var(--novel-surface)] text-[var(--novel-on-surface)] placeholder:text-[var(--novel-on-surface-variant)] rounded-md shadow-sm focus:outline-none focus:ring-[var(--novel-primary)] focus:border-[var(--novel-primary)] sm:text-sm"
                 :placeholder="getApiUrlPlaceholder(formData.api_format)"
               >
               <button
                 type="button"
                 @click="formData.llm_provider_url = ''"
-                class="absolute inset-y-0 right-2 flex items-center px-2 text-gray-400 hover:text-gray-600"
+                class="absolute inset-y-0 right-2 flex items-center px-2 text-[var(--novel-on-surface-variant)] hover:text-[var(--novel-on-surface)]"
               >
                 <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
@@ -205,20 +250,20 @@
 
           <!-- API Key -->
           <div>
-            <label for="key" class="block text-sm font-medium text-gray-700">API Key</label>
+            <label for="key" class="block text-sm font-medium text-[var(--novel-on-surface)]">API Key</label>
             <div class="relative mt-1">
               <input
                 :type="showApiKey ? 'text' : 'password'"
                 id="key"
                 v-model="formData.llm_provider_api_key"
-                class="block w-full px-3 py-2 pr-20 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                class="block w-full px-3 py-2 pr-20 border border-[var(--novel-outline)] bg-[var(--novel-surface)] text-[var(--novel-on-surface)] placeholder:text-[var(--novel-on-surface-variant)] rounded-md shadow-sm focus:outline-none focus:ring-[var(--novel-primary)] focus:border-[var(--novel-primary)] sm:text-sm"
                 placeholder="留空则使用系统默认 Key"
               >
               <div class="absolute inset-y-0 right-2 flex items-center gap-1">
                 <button
                   type="button"
                   @click="showApiKey = !showApiKey"
-                  class="p-1 text-gray-400 hover:text-gray-600"
+                  class="p-1 text-[var(--novel-on-surface-variant)] hover:text-[var(--novel-on-surface)]"
                 >
                   <svg v-if="showApiKey" class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
                     <path fill-rule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clip-rule="evenodd" />
@@ -232,7 +277,7 @@
                 <button
                   type="button"
                   @click="formData.llm_provider_api_key = ''"
-                  class="p-1 text-gray-400 hover:text-gray-600"
+                  class="p-1 text-[var(--novel-on-surface-variant)] hover:text-[var(--novel-on-surface)]"
                 >
                   <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
                     <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
@@ -244,8 +289,8 @@
 
           <!-- 模型选择 -->
           <div>
-            <label for="model" class="block text-sm font-medium text-gray-700">Model</label>
-            <p class="text-xs text-gray-500 mt-0.5 mb-1">可直接输入自定义模型名称，或点击「获取模型」从列表选择</p>
+            <label for="model" class="block text-sm font-medium text-[var(--novel-on-surface)]">Model</label>
+            <p class="text-xs text-[var(--novel-on-surface-variant)] mt-0.5 mb-1">可直接输入自定义模型名称，或点击「获取模型」从列表选择</p>
             <div class="flex gap-2">
               <div class="relative flex-1">
                 <input
@@ -254,13 +299,13 @@
                   v-model="formData.llm_provider_model"
                   @focus="onModelInputFocus"
                   @blur="hideDropdown"
-                  class="block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  class="block w-full px-3 py-2 pr-10 border border-[var(--novel-outline)] bg-[var(--novel-surface)] text-[var(--novel-on-surface)] placeholder:text-[var(--novel-on-surface-variant)] rounded-md shadow-sm focus:outline-none focus:ring-[var(--novel-primary)] focus:border-[var(--novel-primary)] sm:text-sm"
                   placeholder="输入模型名称，如 gpt-4o、claude-3-5-sonnet..."
                 >
                 <button
                   type="button"
                   @click="formData.llm_provider_model = ''"
-                  class="absolute inset-y-0 right-2 flex items-center px-2 text-gray-400 hover:text-gray-600"
+                  class="absolute inset-y-0 right-2 flex items-center px-2 text-[var(--novel-on-surface-variant)] hover:text-[var(--novel-on-surface)]"
                 >
                   <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
                     <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
@@ -269,20 +314,20 @@
                 <!-- 模型下拉列表 -->
                 <div
                   v-if="showModelDropdown && availableModels.length > 0"
-                  class="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto"
+                  class="absolute z-10 w-full mt-1 bg-[var(--novel-surface)] border border-[var(--novel-outline)] rounded-md shadow-lg max-h-60 overflow-auto"
                 >
-                  <div class="px-3 py-2 text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
+                  <div class="px-3 py-2 text-xs text-[var(--novel-on-surface-variant)] border-b border-[var(--novel-outline-variant)] bg-[var(--novel-surface-container-low)]">
                     从列表选择或直接输入自定义名称
                   </div>
                   <div
                     v-for="model in filteredModels"
                     :key="model"
                     @mousedown="selectModel(model)"
-                    class="px-3 py-2 cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 text-sm"
+                    class="px-3 py-2 cursor-pointer hover:bg-[var(--novel-primary-container)] hover:text-[var(--novel-on-primary-container)] text-sm"
                   >
                     {{ model }}
                   </div>
-                  <div v-if="filteredModels.length === 0" class="px-3 py-2 text-sm text-gray-500">
+                  <div v-if="filteredModels.length === 0" class="px-3 py-2 text-sm text-[var(--novel-on-surface-variant)]">
                     无匹配模型，可继续输入自定义名称
                   </div>
                 </div>
@@ -291,7 +336,7 @@
                 type="button"
                 @click="loadModels"
                 :disabled="isLoadingModels || !formData.llm_provider_api_key"
-                class="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                class="px-4 py-2 bg-[var(--novel-secondary)] text-[var(--novel-on-secondary)] rounded-md hover:bg-[var(--novel-secondary-dark)] transition-colors disabled:bg-[var(--novel-outline-variant)] disabled:text-[var(--novel-on-surface-variant)] disabled:cursor-not-allowed flex items-center gap-2"
               >
                 <svg v-if="isLoadingModels" class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -304,9 +349,9 @@
 
           <!-- 蓝图生成每批章节数 -->
           <div>
-            <label for="batchSize" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="batchSize" class="block text-sm font-medium text-[var(--novel-on-surface)] mb-1">
               蓝图生成每批章节数
-              <span class="text-xs text-gray-400 ml-1">（如果代理服务有输出限制，请减小此值）</span>
+              <span class="text-xs text-[var(--novel-on-surface-variant)] ml-1">（如果代理服务有输出限制，请减小此值）</span>
             </label>
             <input
               type="number"
@@ -314,7 +359,7 @@
               v-model.number="formData.blueprint_batch_size"
               min="1"
               max="50"
-              class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              class="block w-full px-3 py-2 border border-[var(--novel-outline)] bg-[var(--novel-surface)] text-[var(--novel-on-surface)] placeholder:text-[var(--novel-on-surface-variant)] rounded-md shadow-sm focus:outline-none focus:ring-[var(--novel-primary)] focus:border-[var(--novel-primary)] sm:text-sm"
               placeholder="默认 5"
             >
           </div>
@@ -325,7 +370,7 @@
               type="button"
               @click="handleTestConnectionInDialog"
               :disabled="isTestingConnectionInDialog || !formData.llm_provider_api_key || !formData.llm_provider_model"
-              class="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              class="w-full px-4 py-2 bg-[var(--novel-info)] text-[var(--novel-on-info)] rounded-md hover:bg-[var(--novel-info)] transition-colors disabled:bg-[var(--novel-outline-variant)] disabled:text-[var(--novel-on-surface-variant)] disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <svg v-if="isTestingConnectionInDialog" class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -340,14 +385,14 @@
               :class="[
                 'mt-2 px-3 py-2 rounded-md text-sm flex items-center gap-2',
                 dialogTestResult.success
-                  ? 'bg-green-50 text-green-700'
-                  : 'bg-red-50 text-red-700'
+                  ? 'bg-[var(--novel-success-container)] text-[var(--novel-on-success-container)]'
+                  : 'bg-[var(--novel-error-container)] text-[var(--novel-on-error-container)]'
               ]"
             >
-              <svg v-if="dialogTestResult.success" class="w-4 h-4 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+              <svg v-if="dialogTestResult.success" class="w-4 h-4 text-[var(--novel-success)]" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
               </svg>
-              <svg v-else class="w-4 h-4 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+              <svg v-else class="w-4 h-4 text-[var(--novel-error)]" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
               </svg>
               <span>{{ dialogTestResult.message }}</span>
@@ -359,14 +404,14 @@
             <button
               type="button"
               @click="closeDialog"
-              class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              class="px-4 py-2 text-[var(--novel-on-surface)] bg-[var(--novel-surface-container)] rounded-lg hover:bg-[var(--novel-surface-container-high)] transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
               :disabled="isSaving"
-              class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-indigo-400 flex items-center gap-2"
+              class="px-4 py-2 bg-[var(--novel-primary)] text-[var(--novel-on-primary)] rounded-lg hover:bg-[var(--novel-primary-dark)] transition-colors disabled:bg-[var(--novel-primary-container)] disabled:text-[var(--novel-on-primary-container)] flex items-center gap-2"
             >
               <svg v-if="isSaving" class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -442,6 +487,9 @@ const filteredModels = computed(() => {
     model.toLowerCase().includes(searchTerm)
   );
 });
+
+const totalConfigs = computed(() => configs.value.length);
+const activeConfig = computed(() => configs.value.find(config => config.is_active) || null);
 
 // 加载配置列表
 const loadConfigs = async () => {
